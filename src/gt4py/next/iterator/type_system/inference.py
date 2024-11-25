@@ -67,7 +67,7 @@ def _is_compatible_type(type_a: ts.TypeSpec, type_b: ts.TypeSpec):
             is_compatible &= type_a.position_dims == type_b.position_dims
         if type_a.defined_dims and type_b.defined_dims:
             is_compatible &= type_a.defined_dims == type_b.defined_dims
-        is_compatible &= type_a.element_type == type_b.element_type
+        is_compatible &= _is_compatible_type(type_a.element_type, type_b.element_type
     elif isinstance(type_a, ts.TupleType) and isinstance(type_b, ts.TupleType):
         for el_type_a, el_type_b in zip(type_a.types, type_b.types, strict=True):
             is_compatible &= _is_compatible_type(el_type_a, el_type_b)

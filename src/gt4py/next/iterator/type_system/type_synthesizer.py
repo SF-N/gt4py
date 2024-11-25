@@ -93,7 +93,11 @@ def power(base: ts.ScalarType, exponent: ts.ScalarType) -> ts.ScalarType:
 
 
 @_register_builtin_type_synthesizer(fun_names=itir.BINARY_MATH_NUMBER_BUILTINS)
-def _(lhs: ts.ScalarType, rhs: ts.ScalarType) -> ts.ScalarType:
+def _(lhs: ts.ScalarType | ts.DeferredType, rhs: ts.ScalarType | ts.DeferredType) -> ts.ScalarType:
+    if isinstance(lhs, ts.DeferredType):
+        return rhs
+    elif isinstance(rhs, ts.DeferredType):
+        return lhs
     assert lhs == rhs
     return lhs
 
@@ -145,7 +149,7 @@ def if_(pred: ts.ScalarType, true_branch: ts.DataType, false_branch: ts.DataType
         )(functools.partial(if_, pred))(true_branch, false_branch)
 
     assert not isinstance(true_branch, ts.TupleType) and not isinstance(false_branch, ts.TupleType)
-    assert isinstance(pred, ts.ScalarType) and pred.kind == ts.ScalarKind.BOOL
+    assert (isinstance(pred, ts.DataType) and pred.kind == ts.ScalarKind.BOOL) or isinstance(pred, ts.DeferredType)
     # TODO(tehrengruber): Enable this or a similar check. In case the true- and false-branch are
     #  iterators defined on different positions this fails. For the GTFN backend we also don't
     #  want this, but for roundtrip it is totally fine.
@@ -257,8 +261,13 @@ def _convert_as_fieldop_input_to_iterator(
     else:
         input_dims = []
 
+    def extract_dtype_deferred(symbol_type: ts.TypeSpec) -> ts.ScalarType | ts.DeferredType:
+        if isinstance(symbol_type, ts.DeferredType):
+            return ts.DeferredType(constraint=None)
+        return type_info.extract_dtype(symbol_type)
+
     element_type: ts.DataType
-    element_type = type_info.apply_to_primitive_constituents(type_info.extract_dtype, input_)
+    element_type = type_info.apply_to_primitive_constituents(extract_dtype_deferred, input_)
 
     # handle neighbor / sparse input fields
     defined_dims = []
@@ -299,21 +308,21 @@ def as_fieldop(
 
     @TypeSynthesizer
     def applied_as_fieldop(*fields) -> ts.FieldType | ts.DeferredType:
-        if any(
-            isinstance(el, ts.DeferredType)
-            for f in fields
-            for el in type_info.primitive_constituents(f)
-        ):
-            return ts.DeferredType(constraint=None)
+        # if any(
+        #     isinstance(el, ts.DeferredType)
+        #     for f in fields
+        #     for el in type_info.primitive_constituents(f)
+        # ):
+        #     return ts.DeferredType(constraint=None)
 
         stencil_return = stencil(
             *(_convert_as_fieldop_input_to_iterator(domain, field) for field in fields),
             offset_provider=offset_provider,
         )
-        assert isinstance(stencil_return, ts.DataType)
+        assert isinstance(stencil_return, (ts.DataType, ts.DeferredType))
         return type_info.apply_to_primitive_constituents(
             lambda el_type: ts.FieldType(dims=domain.dims, dtype=el_type)
-            if domain.dims != "unknown"
+            if domain.dims != "unknown" and not isinstance(el_type, ts.DeferredType)
             else ts.DeferredType(constraint=ts.FieldType),
             stencil_return,
         )
@@ -343,6 +352,8 @@ def map_(op: TypeSynthesizer) -> TypeSynthesizer:
         *args: it_ts.ListType, offset_provider: common.OffsetProvider
     ) -> it_ts.ListType:
         assert len(args) > 0
+        if any(isinstance(arg, ts.DeferredType) for arg in args):
+            return ts.DeferredType(constraint=it_ts.ListType)
         assert all(isinstance(arg, it_ts.ListType) for arg in args)
         arg_el_types = [arg.element_type for arg in args]
         el_type = op(*arg_el_types, offset_provider=offset_provider)

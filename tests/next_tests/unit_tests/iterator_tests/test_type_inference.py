@@ -181,6 +181,14 @@ def expression_test_cases():
             ),
             ts.DeferredType(constraint=None),
         ),
+        (
+            im.as_fieldop(im.lambda_("x")(im.make_tuple(im.deref("x"), 1.0)), im.call("cartesian_domain")(
+                        im.call("named_range")(itir.AxisLiteral(value="IDim"), 0, 1)
+                    ))(
+                im.ref("inp", ts.DeferredType(constraint=None))
+            ),
+            ts.TupleType(types=[ts.DeferredType(constraint=ts.FieldType), float_i_field]),
+        ),
         # if in field-view scope
         (
             im.if_(
