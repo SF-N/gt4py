@@ -19,8 +19,8 @@ import numpy as np
 
 import gt4py.eve.codegen
 from gt4py import eve
-from gt4py.next import Dimension
-from gt4py.next.common import _DEFAULT_SKIP_VALUE as neighbor_skip_value, Connectivity
+from gt4py.next import common
+from gt4py.next.common import _DEFAULT_SKIP_VALUE as neighbor_skip_value
 from gt4py.next.iterator import ir as itir
 from gt4py.next.iterator.ir import FunCall, Lambda
 from gt4py.next.iterator.type_system import type_specifications as it_ts
@@ -201,15 +201,15 @@ def _visit_lift_in_neighbors_reduction(
     transformer: PythonTaskletCodegen,
     node: itir.FunCall,
     node_args: Sequence[IteratorExpr | list[ValueExpr]],
-    offset_provider: Connectivity,
+    connectivity_type: common.NeighborConnectivityType,
     map_entry: dace.nodes.MapEntry,
     map_exit: dace.nodes.MapExit,
     neighbor_index_node: dace.nodes.AccessNode,
     neighbor_value_node: dace.nodes.AccessNode,
 ) -> list[ValueExpr]:
     assert transformer.context.reduce_identity is not None
-    neighbor_dim = offset_provider.neighbor_axis.value
-    origin_dim = offset_provider.origin_axis.value
+    neighbor_dim = connectivity_type.codomain.value
+    origin_dim = connectivity_type.source_dim.value
 
     lifted_args: list[IteratorExpr | ValueExpr] = []
     for arg in node_args:
@@ -246,7 +246,7 @@ def _visit_lift_in_neighbors_reduction(
             assert isinstance(y, ValueExpr)
             input_nodes[x] = y.value
 
-    neighbor_tables = get_used_connectivities(node.args[0], transformer.offset_provider)
+    neighbor_tables = get_used_connectivities(node.args[0], transformer.offset_provider_type)
     connectivity_names = [
         dace_utils.connectivity_identifier(offset) for offset in neighbor_tables.keys()
     ]
@@ -308,7 +308,7 @@ def _visit_lift_in_neighbors_reduction(
         memlet=dace.Memlet(data=neighbor_value_node.data, subset=",".join(map_entry.params)),
     )
 
-    if offset_provider.has_skip_values:
+    if connectivity_type.has_skip_values:
         # check neighbor validity on if/else inter-state edge
         # use one branch for connectivity case
         start_state = lift_context.body.add_state_before(
@@ -347,8 +347,8 @@ def builtin_neighbors(
     assert isinstance(offset_literal, itir.OffsetLiteral)
     offset_dim = offset_literal.value
     assert isinstance(offset_dim, str)
-    offset_provider = transformer.offset_provider[offset_dim]
-    if not isinstance(offset_provider, Connectivity):
+    connectivity_type = transformer.offset_provider_type[offset_dim]
+    if not isinstance(connectivity_type, common.NeighborConnectivityType):
         raise NotImplementedError(
             "Neighbor reduction only implemented for connectivity based on neighbor tables."
         )
@@ -365,7 +365,7 @@ def builtin_neighbors(
         iterator = transformer.visit(data)
     assert isinstance(iterator, IteratorExpr)
     field_desc = iterator.field.desc(transformer.context.body)
-    origin_index_node = iterator.indices[offset_provider.origin_axis.value]
+    origin_index_node = iterator.indices[connectivity_type.source_dim.value]
 
     assert transformer.context.reduce_identity is not None
     assert transformer.context.reduce_identity.dtype == iterator.dtype
@@ -375,7 +375,7 @@ def builtin_neighbors(
     sdfg.add_array(
         neighbor_value_var,
         dtype=iterator.dtype,
-        shape=(offset_provider.max_neighbors,),
+        shape=(connectivity_type.max_neighbors,),
         transient=True,
     )
     neighbor_value_node = state.add_access(neighbor_value_var, debuginfo=di)
@@ -389,7 +389,7 @@ def builtin_neighbors(
     neighbor_map_index = unique_name(f"{offset_dim}_neighbor_map_idx")
     me, mx = state.add_map(
         f"{offset_dim}_neighbor_map",
-        ndrange={neighbor_map_index: f"0:{offset_provider.max_neighbors}"},
+        ndrange={neighbor_map_index: f"0:{connectivity_type.max_neighbors}"},
         debuginfo=di,
     )
 
@@ -428,7 +428,7 @@ def builtin_neighbors(
             transformer,
             lift_node,
             lift_args,
-            offset_provider,
+            connectivity_type,
             me,
             mx,
             neighbor_index_node,
@@ -437,13 +437,13 @@ def builtin_neighbors(
     else:
         sorted_dims = transformer.get_sorted_field_dimensions(iterator.dimensions)
         data_access_index = ",".join(f"{dim}_v" for dim in sorted_dims)
-        connector_neighbor_dim = f"{offset_provider.neighbor_axis.value}_v"
+        connector_neighbor_dim = f"{connectivity_type.codomain.value}_v"
         data_access_tasklet = state.add_tasklet(
             "data_access",
             code=f"__data = __field[{data_access_index}] "
             + (
                 f"if {connector_neighbor_dim} != {neighbor_skip_value} else {transformer.context.reduce_identity.value}"
-                if offset_provider.has_skip_values
+                if connectivity_type.has_skip_values
                 else ""
             ),
             inputs={"__field"} | {f"{dim}_v" for dim in iterator.dimensions},
@@ -459,7 +459,7 @@ def builtin_neighbors(
         )
         for dim in iterator.dimensions:
             connector = f"{dim}_v"
-            if dim == offset_provider.neighbor_axis.value:
+            if dim == connectivity_type.codomain.value:
                 state.add_edge(
                     neighbor_index_node,
                     None,
@@ -484,7 +484,7 @@ def builtin_neighbors(
             src_conn="__data",
         )
 
-    if not offset_provider.has_skip_values:
+    if not connectivity_type.has_skip_values:
         return [ValueExpr(neighbor_value_node, iterator.dtype)]
     else:
         """
@@ -497,7 +497,7 @@ def builtin_neighbors(
         sdfg.add_array(
             neighbor_valid_var,
             dtype=dace.dtypes.bool,
-            shape=(offset_provider.max_neighbors,),
+            shape=(connectivity_type.max_neighbors,),
             transient=True,
         )
         neighbor_valid_node = state.add_access(neighbor_valid_var, debuginfo=di)
@@ -586,7 +586,7 @@ def builtin_if(
         symbol_map = copy.deepcopy(transformer.context.symbol_map)
         node_context = Context(sdfg, state, symbol_map)
         node_taskgen = PythonTaskletCodegen(
-            transformer.offset_provider,
+            transformer.offset_provider_type,
             node_context,
             transformer.use_field_canonical_representation,
         )
@@ -898,20 +898,11 @@ class GatherOutputSymbolsPass(eve.NodeVisitor):
             )
 
 
+@dataclasses.dataclass
 class PythonTaskletCodegen(gt4py.eve.codegen.TemplatedGenerator):
-    offset_provider: dict[str, Any]
+    offset_provider_type: common.OffsetProviderType
     context: Context
     use_field_canonical_representation: bool
-
-    def __init__(
-        self,
-        offset_provider: dict[str, Any],
-        context: Context,
-        use_field_canonical_representation: bool,
-    ):
-        self.offset_provider = offset_provider
-        self.context = context
-        self.use_field_canonical_representation = use_field_canonical_representation
 
     def get_sorted_field_dimensions(self, dims: Sequence[str]):
         return sorted(dims) if self.use_field_canonical_representation else dims
@@ -928,7 +919,7 @@ class PythonTaskletCodegen(gt4py.eve.codegen.TemplatedGenerator):
     ]:
         func_name = f"lambda_{abs(hash(node)):x}"
         neighbor_tables = (
-            get_used_connectivities(node, self.offset_provider) if use_neighbor_tables else {}
+            get_used_connectivities(node, self.offset_provider_type) if use_neighbor_tables else {}
         )
         connectivity_names = [
             dace_utils.connectivity_identifier(offset) for offset in neighbor_tables.keys()
@@ -988,7 +979,7 @@ class PythonTaskletCodegen(gt4py.eve.codegen.TemplatedGenerator):
             reduce_identity=self.context.reduce_identity,
         )
         lambda_taskgen = PythonTaskletCodegen(
-            self.offset_provider,
+            self.offset_provider_type,
             lambda_context,
             self.use_field_canonical_representation,
         )
@@ -1080,7 +1071,7 @@ class PythonTaskletCodegen(gt4py.eve.codegen.TemplatedGenerator):
                         store, self.context.body.arrays[store]
                     )
 
-        neighbor_tables = get_used_connectivities(node.fun, self.offset_provider)
+        neighbor_tables = get_used_connectivities(node.fun, self.offset_provider_type)
         for offset in neighbor_tables.keys():
             var = dace_utils.connectivity_identifier(offset)
             nsdfg_inputs[var] = dace.Memlet.from_array(var, self.context.body.arrays[var])
@@ -1150,12 +1141,13 @@ class PythonTaskletCodegen(gt4py.eve.codegen.TemplatedGenerator):
             dims_not_indexed = [dim for dim in iterator.dimensions if dim not in iterator.indices]
             assert len(dims_not_indexed) == 1
             offset = dims_not_indexed[0]
-            offset_provider = self.offset_provider[offset]
-            neighbor_dim = offset_provider.neighbor_axis.value
+            offset_provider_type = self.offset_provider_type[offset]
+            assert isinstance(offset_provider_type, common.NeighborConnectivityType)
+            neighbor_dim = offset_provider_type.codomain.value
 
             result_name = unique_var_name()
             self.context.body.add_array(
-                result_name, (offset_provider.max_neighbors,), iterator.dtype, transient=True
+                result_name, (offset_provider_type.max_neighbors,), iterator.dtype, transient=True
             )
             result_array = self.context.body.arrays[result_name]
             result_node = self.context.state.add_access(result_name, debuginfo=di)
@@ -1172,7 +1164,7 @@ class PythonTaskletCodegen(gt4py.eve.codegen.TemplatedGenerator):
 
             # we create a mapped tasklet for array slicing
             index_name = unique_name(f"_i_{neighbor_dim}")
-            map_ranges = {index_name: f"0:{offset_provider.max_neighbors}"}
+            map_ranges = {index_name: f"0:{offset_provider_type.max_neighbors}"}
             src_subset = ",".join(
                 [f"_i_{dim}" if dim in iterator.indices else index_name for dim in sorted_dims]
             )
@@ -1226,27 +1218,30 @@ class PythonTaskletCodegen(gt4py.eve.codegen.TemplatedGenerator):
         offset_node = self.visit(tail[1])[0]
         assert offset_node.dtype in dace.dtypes.INTEGER_TYPES
 
-        if isinstance(self.offset_provider[offset_dim], Connectivity):
-            offset_provider = self.offset_provider[offset_dim]
+        if isinstance(self.offset_provider_type[offset_dim], common.NeighborConnectivityType):
+            offset_provider_type = cast(
+                common.NeighborConnectivityType, self.offset_provider_type[offset_dim]
+            )  # ensured by condition
             connectivity = self.context.state.add_access(
                 dace_utils.connectivity_identifier(offset_dim), debuginfo=di
             )
 
-            shifted_dim = offset_provider.origin_axis.value
-            target_dim = offset_provider.neighbor_axis.value
+            shifted_dim_tag = offset_provider_type.source_dim.value
+            target_dim_tag = offset_provider_type.codomain.value
             args = [
                 ValueExpr(connectivity, _INDEX_DTYPE),
-                ValueExpr(iterator.indices[shifted_dim], offset_node.dtype),
+                ValueExpr(iterator.indices[shifted_dim_tag], offset_node.dtype),
                 offset_node,
             ]
             internals = [f"{arg.value.data}_v" for arg in args]
             expr = f"{internals[0]}[{internals[1]}, {internals[2]}]"
         else:
-            assert isinstance(self.offset_provider[offset_dim], Dimension)
+            shifted_dim = self.offset_provider_type[offset_dim]
+            assert isinstance(shifted_dim, common.Dimension)
 
-            shifted_dim = self.offset_provider[offset_dim].value
-            target_dim = shifted_dim
-            args = [ValueExpr(iterator.indices[shifted_dim], offset_node.dtype), offset_node]
+            shifted_dim_tag = shifted_dim.value
+            target_dim_tag = shifted_dim_tag
+            args = [ValueExpr(iterator.indices[shifted_dim_tag], offset_node.dtype), offset_node]
             internals = [f"{arg.value.data}_v" for arg in args]
             expr = f"{internals[0]} + {internals[1]}"
 
@@ -1255,8 +1250,8 @@ class PythonTaskletCodegen(gt4py.eve.codegen.TemplatedGenerator):
         )[0].value
 
         shifted_index = {dim: value for dim, value in iterator.indices.items()}
-        del shifted_index[shifted_dim]
-        shifted_index[target_dim] = shifted_value
+        del shifted_index[shifted_dim_tag]
+        shifted_index[target_dim_tag] = shifted_value
 
         return IteratorExpr(iterator.field, shifted_index, iterator.dtype, iterator.dimensions)
 
@@ -1520,7 +1515,7 @@ def is_scan(node: itir.Node) -> bool:
 
 def closure_to_tasklet_sdfg(
     node: itir.StencilClosure,
-    offset_provider: dict[str, Any],
+    offset_provider_type: common.OffsetProviderType,
     domain: dict[str, str],
     inputs: Sequence[tuple[str, ts.TypeSpec]],
     connectivities: Sequence[tuple[dace.ndarray, str]],
@@ -1561,7 +1556,9 @@ def closure_to_tasklet_sdfg(
         body.add_array(name, shape=shape, strides=strides, dtype=arr.dtype)
 
     context = Context(body, state, symbol_map)
-    translator = PythonTaskletCodegen(offset_provider, context, use_field_canonical_representation)
+    translator = PythonTaskletCodegen(
+        offset_provider_type, context, use_field_canonical_representation
+    )
 
     args = [itir.SymRef(id=name) for name, _ in inputs]
     if is_scan(node.stencil):
