@@ -179,6 +179,7 @@ def domain_union(*domains: SymbolicDomain) -> SymbolicDomain:
         )
         # constant fold expression to keep the tree small
         start, stop = ConstantFolding.apply(start), ConstantFolding.apply(stop)  # type: ignore[assignment]  # always an itir.FunCall
+
         new_domain_ranges[dim] = SymbolicRange(start, stop)
 
     return SymbolicDomain(domains[0].grid_type, new_domain_ranges)
