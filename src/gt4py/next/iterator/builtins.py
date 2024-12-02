@@ -7,6 +7,8 @@
 # SPDX-License-Identifier: BSD-3-Clause
 
 from gt4py.next.iterator.dispatcher import Dispatcher
+
+
 try:
     import ml_dtypes
 except ModuleNotFoundError:
@@ -386,9 +388,11 @@ def float(*args):  # noqa: A001 [builtin-variable-shadowing]
 
 
 if ml_dtypes:
+
     @builtin_dispatch
     def bfloat16(*args):
         raise BackendNotSelectedError()
+
 
 @builtin_dispatch
 def float16(*args):

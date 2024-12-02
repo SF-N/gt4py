@@ -23,6 +23,8 @@ from typing import (
 )
 
 import numpy as np
+
+
 try:
     import ml_dtypes
 except ModuleNotFoundError:
@@ -333,7 +335,10 @@ def is_arithmetic(symbol_type: ts.TypeSpec) -> bool:
 def arithmetic_bounds(arithmetic_type: ts.ScalarType) -> tuple[np.number, np.number]:
     assert is_arithmetic(arithmetic_type)
     bounds = {  # type: ignore[return-value] # why resolved to `tuple[object, object]`?
-        ts.ScalarKind.FLOAT16: (np.finfo(np.float16).min, np.finfo(np.float16).max),  # todo: cleanup?
+        ts.ScalarKind.FLOAT16: (
+            np.finfo(np.float16).min,
+            np.finfo(np.float16).max,
+        ),  # todo: cleanup?
         ts.ScalarKind.FLOAT32: (np.finfo(np.float32).min, np.finfo(np.float32).max),
         ts.ScalarKind.FLOAT64: (np.finfo(np.float64).min, np.finfo(np.float64).max),
         ts.ScalarKind.INT8: (np.iinfo(np.int8).min, np.iinfo(np.int8).max),
@@ -346,7 +351,10 @@ def arithmetic_bounds(arithmetic_type: ts.ScalarType) -> tuple[np.number, np.num
         ts.ScalarKind.UINT64: (np.iinfo(np.uint64).min, np.iinfo(np.uint64).max),
     }
     if ml_dtypes:
-        bounds[ts.ScalarKind.BFLOAT16] = (ml_dtypes.finfo(ml_dtypes.bfloat16).min, ml_dtypes.finfo(ml_dtypes.bfloat16).max)
+        bounds[ts.ScalarKind.BFLOAT16] = (
+            ml_dtypes.finfo(ml_dtypes.bfloat16).min,
+            ml_dtypes.finfo(ml_dtypes.bfloat16).max,
+        )
     return bounds[arithmetic_type.kind]
 
 

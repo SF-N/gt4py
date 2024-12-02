@@ -18,6 +18,8 @@ from typing import Any, ForwardRef, Optional
 
 import numpy as np
 import numpy.typing as npt
+
+
 try:
     import ml_dtypes
 except ModuleNotFoundError:
@@ -245,9 +247,9 @@ def as_dtype(type_: ts.ScalarType) -> core_defs.DType:
         return core_defs.Int32DType()
     elif type_.kind == ts.ScalarKind.INT64:
         return core_defs.Int64DType()
-    elif type_.kind == ts.ScalarKind.FLOAT16: # TODO
+    elif type_.kind == ts.ScalarKind.FLOAT16:  # TODO
         return core_defs.Float16DType()
-    elif type_.kind == ts.ScalarKind.BFLOAT16: # TODO
+    elif type_.kind == ts.ScalarKind.BFLOAT16:  # TODO
         return core_defs.BFloat16DType()
     elif type_.kind == ts.ScalarKind.FLOAT32:
         return core_defs.Float32DType()
@@ -269,9 +271,9 @@ def from_dtype(dtype: core_defs.DType) -> ts.ScalarType:
         return ts.ScalarType(kind=ts.ScalarKind.INT32)
     elif dtype == core_defs.Int64DType():
         return ts.ScalarType(kind=ts.ScalarKind.INT64)
-    elif dtype == core_defs.Float16DType(): #TODO
+    elif dtype == core_defs.Float16DType():  # TODO
         return ts.ScalarType(kind=ts.ScalarKind.FLOAT16)
-    elif dtype == core_defs.BFloat16DType(): #TODO
+    elif dtype == core_defs.BFloat16DType():  # TODO
         return ts.ScalarType(kind=ts.ScalarKind.BFLOAT16)
     elif dtype == core_defs.Float32DType():
         return ts.ScalarType(kind=ts.ScalarKind.FLOAT32)

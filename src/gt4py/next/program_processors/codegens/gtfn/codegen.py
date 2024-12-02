@@ -7,6 +7,8 @@
 # SPDX-License-Identifier: BSD-3-Clause
 
 from typing import Any, Collection, Final, Union
+
+
 try:
     import ml_dtypes
 except ModuleNotFoundError:
@@ -112,9 +114,13 @@ class GTFNCodegen(codegen.TemplatedGenerator):
             case "double":
                 return self.asfloat(node.value)
             case "std::float16_t":
-                return "std::float16_t("+self.asfloat(node.value)+")"  # TODO: this is not a proper solution
+                return (
+                    "std::float16_t(" + self.asfloat(node.value) + ")"
+                )  # TODO: this is not a proper solution
             case "std::bfloat16_t":
-                return "std::bfloat16_t("+self.asfloat(node.value)+")"  # TODO: this is not a proper solution
+                return (
+                    "std::bfloat16_t(" + self.asfloat(node.value) + ")"
+                )  # TODO: this is not a proper solution
             case "bool":
                 return node.value.lower()
             case _:

@@ -36,13 +36,13 @@ def convert_arg(arg: Any) -> Any:
 
         # TODO: bloody hack just to get a dlpack compatible array of bfloat16s
         try:
-            from ml_dtypes import bfloat16
             import jax.numpy as jnp
+            from ml_dtypes import bfloat16
+
             if arr.dtype == bfloat16:
                 arr = jnp.asarray(arr, dtype=jnp.bfloat16)
         except:
             raise ValueError("ml_dtypes and jax must to be installed.")
-
 
         return arr, origin
     else:

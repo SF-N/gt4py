@@ -48,6 +48,14 @@ class SymbolicRange:
     def translate(self, distance: int) -> SymbolicRange:
         return SymbolicRange(im.plus(self.start, distance), im.plus(self.stop, distance))
 
+    # def translate(self, distance: int) -> SymbolicRange:
+    #     start = im.plus(self.start, distance)
+    #     start = im.call(
+    #         "maximum"
+    #     )(
+    #         0, start
+    #     )  # otherwise temporary with negative start in velocity_advection_stencil_8_to_13 / pseudoflux_z_div
+    #     return SymbolicRange(start, im.plus(self.stop, distance))
 
 @dataclasses.dataclass
 class SymbolicDomain:

@@ -17,6 +17,7 @@ from typing import Any, Callable, Literal, Optional, Protocol, TypeAlias
 
 import numpy as np
 import pytest
+
 try:
     import ml_dtypes
 except ModuleNotFoundError:

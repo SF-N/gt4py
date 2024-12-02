@@ -27,6 +27,8 @@ from numpy import (
     uint32,
     uint64,
 )
+
+
 try:
     import ml_dtypes
 except ModuleNotFoundError:
@@ -60,6 +62,7 @@ TYPE_BUILTINS = [
 ]  # TODO(tehrengruber): validate matches itir type builtins?
 if ml_dtypes:
     from ml_dtypes import bfloat16
+
     TYPE_BUILTINS.append(bfloat16)
 
 TYPE_BUILTIN_NAMES = [t.__name__ for t in TYPE_BUILTINS]

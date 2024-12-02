@@ -1218,10 +1218,17 @@ def test_float16(cartesian_case):
     dtype = np.float16
 
     @gtx.field_operator
-    def multiply_by_two(input: cases.IHalfField, input2: cases.IFloatField, scalar: np.float16) -> cases.IHalfField:
-        return dtype(2) * input * astype(input2, dtype) * scalar ** dtype(1.0) #TODO fails with 0.5
+    def multiply_by_two(
+        input: cases.IHalfField, input2: cases.IFloatField, scalar: np.float16
+    ) -> cases.IHalfField:
+        return (
+            dtype(2) * input * astype(input2, dtype) * scalar ** dtype(1.0)
+        )  # TODO fails with 0.5
+
     cases.verify_with_default_data(
-        cartesian_case, multiply_by_two, ref=lambda input, input2, scalar: dtype(2) * input * input2 * scalar ** dtype(1.0)
+        cartesian_case,
+        multiply_by_two,
+        ref=lambda input, input2, scalar: dtype(2) * input * input2 * scalar ** dtype(1.0),
     )
 
 
@@ -1230,8 +1237,15 @@ def test_bfloat16(cartesian_case):
     dtype = bfloat16
 
     @gtx.field_operator
-    def multiply_by_two(input: cases.IBFloatField, input2: cases.IBFloatField, scalar: bfloat16) -> cases.IBFloatField:
-        return dtype(2) * input * astype(input2, dtype) * scalar ** dtype(1.0) #TODO fails with 0.5
+    def multiply_by_two(
+        input: cases.IBFloatField, input2: cases.IBFloatField, scalar: bfloat16
+    ) -> cases.IBFloatField:
+        return (
+            dtype(2) * input * astype(input2, dtype) * scalar ** dtype(1.0)
+        )  # TODO fails with 0.5
+
     cases.verify_with_default_data(
-        cartesian_case, multiply_by_two, ref=lambda input, input2, scalar: dtype(2) * input * input2 * scalar ** dtype(1.0)
+        cartesian_case,
+        multiply_by_two,
+        ref=lambda input, input2, scalar: dtype(2) * input * input2 * scalar ** dtype(1.0),
     )
