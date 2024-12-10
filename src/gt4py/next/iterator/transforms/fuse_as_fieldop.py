@@ -278,6 +278,18 @@ class FuseAsFieldOp(eve.NodeTranslator):
         # tmp2 = tmp+2
         # out1 = tmp1+tmp2
         # out2 = tmp+d
+
+        if cpm.is_let(node):
+            eligible_args = []
+            for arg in node.args:
+                if isinstance(arg.type, ts.FieldType) and isinstance(arg.type.dtype, it_ts.ListType):
+                    eligible_args.append(True)
+                else:
+                    eligible_args.append(False)
+            if any(eligible_args):
+                node = inline_lambdas.inline_lambda(node, eligible_params=eligible_args)
+                return self.visit(node)
+
         if cpm.is_applied_as_fieldop(node):  # don't descend in stencil
             old_node = node
             node = im.as_fieldop(*node.fun.args)(*self.generic_visit(node.args))
@@ -324,6 +336,7 @@ class FuseAsFieldOp(eve.NodeTranslator):
             if new_node is node:  # nothing has been inlined
                 return new_node
             return self.visit(new_node)
+
             # TODO
             #eligible_args = [_is_center_pos_as_fieldop(arg) for arg in node.args]
             #if any(eligible_args):
