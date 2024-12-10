@@ -7,10 +7,11 @@
 # SPDX-License-Identifier: BSD-3-Clause
 
 import dataclasses
-from typing import Optional
+import itertools
+from typing import Optional, Any
 
 from gt4py import eve
-from gt4py.eve import utils as eve_utils
+from gt4py.eve import utils as eve_utils, concepts
 from gt4py.next import common
 from gt4py.next.iterator import ir as itir
 from gt4py.next.iterator.ir_utils import common_pattern_matcher as cpm, ir_makers as im
@@ -26,7 +27,7 @@ from gt4py.next.iterator.type_system import (
     type_specifications as it_ts,
 )
 from gt4py.next.type_system import type_info, type_specifications as ts
-
+from gt4py.next.iterator.transforms import merge_let
 
 def _merge_arguments(
     args1: dict[str, itir.Expr], arg2: dict[str, itir.Expr]
@@ -84,8 +85,10 @@ def _inline_as_fieldop_arg(
 
     for inner_param, inner_arg in zip(stencil.params, inner_args, strict=True):
         if isinstance(inner_arg, itir.SymRef):
+
             if inner_arg.id in extracted_args:
                 assert extracted_args[inner_arg.id] == inner_arg
+
                 alias = stencil_params[list(extracted_args.keys()).index(inner_arg.id)]
                 stencil_body = im.let(inner_param, im.ref(alias.id))(stencil_body)
             else:
@@ -183,14 +186,18 @@ def fuse_as_fieldop(
             new_args = _merge_arguments(new_args, {new_param: arg})
 
     stencil = im.lambda_(*new_args.keys())(new_stencil_body)
+
     stencil = restore_scan(stencil)
+
 
     # simplify stencil directly to keep the tree small
     new_stencil = inline_lambdas.InlineLambdas.apply(
         stencil, opcount_preserving=True, force_inline_lift_args=False
     )
+
     new_stencil = inline_center_deref_lift_vars.InlineCenterDerefLiftVars.apply(
         new_stencil, is_stencil=True, uids=uids
+
     )  # to keep the tree small
     new_stencil = merge_let.MergeLet().visit(new_stencil)
     new_stencil = inline_lambdas.InlineLambdas.apply(
@@ -200,8 +207,36 @@ def fuse_as_fieldop(
 
     new_node = im.as_fieldop(new_stencil, domain)(*new_args.values())
 
+
     type_inference.copy_type(from_=expr, to=new_node, allow_untyped=True)
+
     return new_node
+
+def _is_pointwise_as_fieldop(node: itir.Expr) -> bool:
+    # TODO: not only check num shifts == 1 but also not ALL_NEIGHBORS to avoid nested neighbor inline
+    # TODO: maybe only fuse when the number of reads does not increase, e.g. do not inline here
+    # because we have two args:
+    # let tmp = as_fieldop(...)(a, b)
+    #   {as_fieldop(...)(tmp), as_fieldop(...)(tmp)}
+    #
+    if not cpm.is_applied_as_fieldop(node):
+        return False
+
+    stencil: itir.Lambda = node.fun.args[0]
+    shifts = trace_shifts.trace_stencil(stencil, num_args=len(node.args))
+    #is_pointwise = all(len(arg_shifts) <= 1 for arg_shifts in shifts)
+    is_pointwise = all(len(arg_shifts) <= 1 for arg_shifts in shifts)
+    is_pointwise &= not any(trace_shifts.Sentinel.ALL_NEIGHBORS in shift_chain for arg_shifts in shifts for shift_chain in arg_shifts)
+    return is_pointwise
+
+def _is_center_pos_as_fieldop(node: itir.Expr) -> bool:
+    if not cpm.is_applied_as_fieldop(node):
+        return False
+
+    stencil: itir.Lambda = node.fun.args[0]
+    shifts = trace_shifts.trace_stencil(stencil, num_args=len(node.args))
+    is_center = all(arg_shifts in [set(), {()}] for arg_shifts in shifts)
+    return is_center
 
 
 def _arg_inline_predicate(node: itir.Expr, shifts):
@@ -286,6 +321,7 @@ class FuseAsFieldOp(eve.NodeTranslator):
 
         return cls(uids=uids).visit(node)
 
+
     def visit_FunCall(self, node: itir.FunCall, **kwargs):
         # inline all fields with list dtype. This needs to happen before the children are visited
         # such that the `as_fieldop` can be fused.
@@ -298,12 +334,14 @@ class FuseAsFieldOp(eve.NodeTranslator):
                 isinstance(arg.type, ts.FieldType) and isinstance(arg.type.dtype, it_ts.ListType)
                 for arg in node.args
             ]
+
             if any(eligible_args):
                 node = inline_lambdas.inline_lambda(node, eligible_params=eligible_args)
                 return self.visit(node)
 
         if cpm.is_applied_as_fieldop(node):  # don't descend in stencil
             old_node = node
+
             node = im.as_fieldop(*node.fun.args)(*self.generic_visit(node.args))  # type: ignore[attr-defined]  # ensured by cpm.is_applied_as_fieldop
             type_inference.copy_type(from_=old_node, to=node)
         elif kwargs.get("recurse", True):
@@ -319,6 +357,7 @@ class FuseAsFieldOp(eve.NodeTranslator):
                     if cpm.is_applied_as_fieldop(arg):
                         assert arg.type
                         _, domain = arg.fun.args  # type: ignore[attr-defined]  # ensured by cpm.is_applied_as_fieldop
+
                         as_fieldop_args_by_domain.setdefault(domain, [])
                         as_fieldop_args_by_domain[domain].append((i, arg))
                     else:
@@ -327,6 +366,7 @@ class FuseAsFieldOp(eve.NodeTranslator):
                 for domain, inner_as_fieldop_args in as_fieldop_args_by_domain.items():
                     if len(inner_as_fieldop_args) > 1:
                         var = self.uids.sequential_id(prefix="__fasfop")
+
                         fused_args = im.op_as_fieldop(lambda *args: im.make_tuple(*args), domain)(
                             *(arg for _, arg in inner_as_fieldop_args)
                         )
@@ -342,6 +382,7 @@ class FuseAsFieldOp(eve.NodeTranslator):
                     else:
                         i, arg = inner_as_fieldop_args[0]
                         new_els[i] = arg
+
                 assert not any(el is None for el in new_els)
                 assert let_vars
                 new_node = im.let(*let_vars.items())(im.make_tuple(*new_els))
@@ -350,6 +391,7 @@ class FuseAsFieldOp(eve.NodeTranslator):
 
         if cpm.is_call_to(node.fun, "as_fieldop"):
             node = _canonicalize_as_fieldop(node)
+
 
         # when multiple `as_fieldop` calls are fused that use the same argument, this argument
         # might become referenced once only. In order to be able to continue fusing such arguments
@@ -374,4 +416,5 @@ class FuseAsFieldOp(eve.NodeTranslator):
                     fuse_as_fieldop(node, eligible_args, uids=self.uids),
                     **{**kwargs, "recurse": False},
                 )
+
         return node

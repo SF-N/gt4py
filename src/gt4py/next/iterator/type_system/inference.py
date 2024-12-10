@@ -103,7 +103,9 @@ def copy_type(from_: itir.Node, to: itir.Node, allow_untyped: bool = False) -> N
     """
     assert allow_untyped is not None or isinstance(from_.type, ts.TypeSpec)
     if from_.type is None:
+
         assert allow_untyped
+
         return
     _set_node_type(to, from_.type)
 

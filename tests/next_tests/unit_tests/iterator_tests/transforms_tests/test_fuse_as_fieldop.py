@@ -133,14 +133,18 @@ def test_staged_inlining():
     )(
         im.op_as_fieldop("plus", d)(
             im.op_as_fieldop(im.lambda_("a")(im.plus("a", 1)), d)("tmp"),
+
             im.op_as_fieldop(im.lambda_("a")(im.plus("a", 2)), d)("tmp"),
+
         )
     )
     expected = im.as_fieldop(
         im.lambda_("a", "b")(
+
             im.let("_icdlv_1", im.plus(im.deref("a"), im.deref("b")))(
                 im.plus(im.plus("_icdlv_1", 1), im.plus("_icdlv_1", 2))
             )
+
         ),
         d,
     )(im.ref("a", field_type), im.ref("b", field_type))
@@ -148,6 +152,7 @@ def test_staged_inlining():
         testee, offset_provider_type={}, allow_undeclared_symbols=True
     )
     assert actual == expected
+
 
 
 def test_make_tuple_fusion_trivial():
@@ -158,11 +163,13 @@ def test_make_tuple_fusion_trivial():
     )
     expected = im.as_fieldop(
         im.lambda_("a")(im.make_tuple(im.deref("a"), im.deref("a"))),
+
         d,
     )(im.ref("a", field_type))
     actual = fuse_as_fieldop.FuseAsFieldOp.apply(
         testee, offset_provider_type={}, allow_undeclared_symbols=True
     )
+
     # simplify to remove unnecessary make_tuple call `{v[0], v[1]}(actual)`
     actual_simplified = collapse_tuple.CollapseTuple.apply(
         actual, within_stencil=False, allow_undeclared_symbols=True
@@ -206,6 +213,7 @@ def test_make_tuple_fusion_different_domains():
         testee, offset_provider_type={}, allow_undeclared_symbols=True
     )
     assert actual == expected
+
 
 
 def test_partial_inline():

@@ -45,9 +45,17 @@ class SymbolicRange:
     start: itir.Expr
     stop: itir.Expr
 
-    def translate(self, distance: int) -> SymbolicRange:
-        return SymbolicRange(im.plus(self.start, distance), im.plus(self.stop, distance))
+    # def translate(self, distance: int) -> SymbolicRange:
+    #     return SymbolicRange(im.plus(self.start, distance), im.plus(self.stop, distance))
 
+    def translate(self, distance: int) -> SymbolicRange:
+        start = im.plus(self.start, distance)
+        start = im.call(
+            "maximum"
+        )(
+            0, start
+        )  # otherwise temporary with negative start in velocity_advection_stencil_8_to_13 / pseudoflux_z_div
+        return SymbolicRange(start, im.plus(self.stop, distance))
 
 @dataclasses.dataclass
 class SymbolicDomain:
@@ -170,7 +178,9 @@ def domain_union(*domains: SymbolicDomain) -> SymbolicDomain:
             [domain.ranges[dim].stop for domain in domains],
         )
         # constant fold expression to keep the tree small
+
         start, stop = ConstantFolding.apply(start), ConstantFolding.apply(stop)  # type: ignore[assignment]  # always an itir.Expr
+
         new_domain_ranges[dim] = SymbolicRange(start, stop)
 
     return SymbolicDomain(domains[0].grid_type, new_domain_ranges)
