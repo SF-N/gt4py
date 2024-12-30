@@ -492,7 +492,7 @@ def cartesian_case(
             "Joff": JDim,
             "Koff": KDim,
         },
-        default_sizes={IDim: 10, JDim: 10, KDim: 10},
+        default_sizes={IDim: 100000, JDim: 100000, KDim: 100000},
         grid_type=common.GridType.CARTESIAN,
         allocator=exec_alloc_descriptor.allocator,
     )

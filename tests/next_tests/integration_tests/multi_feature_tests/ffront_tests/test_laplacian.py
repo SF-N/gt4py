@@ -17,6 +17,12 @@ from next_tests.integration_tests.feature_tests.ffront_tests.ffront_test_utils i
     exec_alloc_descriptor,
 )
 
+
+try:
+    import pytest_benchmark
+except ModuleNotFoundError:
+    pytest_benchmark = None
+
 pytestmark = pytest.mark.uses_cartesian_shift
 
 
@@ -52,6 +58,13 @@ def lap_program(
     in_field: gtx.Field[[IDim, JDim], "float"], out_field: gtx.Field[[IDim, JDim], "float"]
 ):
     lap(in_field, out=out_field[1:-1, 1:-1])
+
+# @gtx.program
+# def lap_program_half(
+#     in_field: gtx.Field[[IDim, JDim], "bfloat16"], out_field: gtx.Field[[IDim, JDim], "bfloat16"]
+# ):
+#     lap(in_field, out=out_field[1:-1, 1:-1])
+
 
 
 @gtx.program
@@ -97,7 +110,29 @@ def test_ffront_lap(cartesian_case):
         inout=out_field[1:-1, 1:-1],
         ref=lap_ref(in_field.ndarray),
     )
-
+#
+# # TODO: don't call this is pytest-benchmark is not installed
+# def test_ffront_lap_benchmark(cartesian_case, benchmark):
+#     in_field = cases.allocate(cartesian_case, lap_program, "in_field")()
+#     in_field = square(in_field)
+#     out_field = cases.allocate(cartesian_case, lap_program, "out_field")()
+#
+#     if pytest_benchmark:
+#         benchmark(lap_program.with_grid_type(cartesian_case.grid_type).with_backend(cartesian_case.backend),in_field, out_field, offset_provider=cartesian_case.offset_provider)
+#     else:
+#         pytest.skip("Test skipped as `pytest-benchmark` is not installed.")
+#
+#
+# def test_ffront_lap_benchmark_half(cartesian_case, benchmark):
+#     in_field = cases.allocate(cartesian_case, lap_program_half, "in_field", dtype='bfloat16')()
+#     in_field = square(in_field)
+#     out_field = cases.allocate(cartesian_case, lap_program_half, "out_field", dtype='bfloat16')()
+#
+#     if pytest_benchmark:
+#         benchmark(lap_program.with_grid_type(cartesian_case.grid_type).with_backend(cartesian_case.backend),in_field, out_field, offset_provider=cartesian_case.offset_provider)
+#     else:
+#         pytest.skip("Test skipped as `pytest-benchmark` is not installed.")
+#
 
 def test_ffront_skewedlap(cartesian_case):
     in_field = cases.allocate(cartesian_case, skewedlap_program, "in_field")()

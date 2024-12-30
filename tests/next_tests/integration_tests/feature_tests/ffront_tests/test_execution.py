@@ -9,6 +9,13 @@
 from functools import reduce
 import numpy as np
 import pytest
+from numpy import float16
+
+try:
+    import pytest_benchmark
+except ModuleNotFoundError:
+    pytest_benchmark = None
+
 
 try:
     from ml_dtypes import bfloat16
@@ -1249,3 +1256,16 @@ def test_bfloat16(cartesian_case):
         multiply_by_two,
         ref=lambda input, input2, scalar: dtype(2) * input * input2 * scalar ** dtype(1.0),
     )
+
+# @pytest.mark.uses_half_precision
+# def test_float16_lap(cartesian_case, benchmark):
+#     dtype = float16
+#
+#     @gtx.field_operator
+#     def lap(in_field: gtx.Field[[IDim, JDim], float16]) -> gtx.Field[[IDim, JDim], float16]:
+#         return (
+#                 dtype(-4.0) * in_field
+#         )
+#     in_field=cases.allocate(cartesian_case, lap, "in_field")()
+#     out_field = cases.allocate(cartesian_case, lap, "out_field")()
+#     benchmark(lap.with_grid_type(cartesian_case.grid_type).with_backend(cartesian_case.backend), in_field, out=out_field, offset_provider=cartesian_case.offset_provider)

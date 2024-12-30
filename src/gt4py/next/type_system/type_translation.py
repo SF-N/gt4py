@@ -167,6 +167,7 @@ def from_type_hint(
                 kw_only_args={},  # TODO
                 returns=returns,
             )
+    print(canonical_type)
     raise ValueError(f"'{type_hint}' type is not supported.")
 
 
