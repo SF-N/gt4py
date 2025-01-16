@@ -22,6 +22,7 @@ from gt4py.next.iterator.ir_utils import (
     ir_makers as im,
 )
 from gt4py.next.iterator.transforms import trace_shifts
+from gt4py.next.type_system import type_specifications as ts
 from gt4py.next.utils import flatten_nested_tuple, tree_map
 
 
@@ -30,7 +31,10 @@ class DomainAccessDescriptor(eve.StrEnum):
     Descriptor for domains that could not be inferred.
     """
 
-    #: The access if unknown because of a dynamic shift.whose extent is not known.
+    # TODO(tehrengruber): Revisit this concept. It is strange that we don't have a descriptor
+    #  `KNOWN`, but since we don't need it, it wasn't added.
+
+    #: The access is unknown because of a dynamic shift.whose extent is not known.
     #: E.g.: `(⇑(λ(arg0, arg1) → ·⟪Ioffₒ, ·arg1⟫(arg0)))(in_field1, in_field2)`
     UNKNOWN = "unknown"
     #: The domain is never accessed.
@@ -38,8 +42,13 @@ class DomainAccessDescriptor(eve.StrEnum):
     NEVER = "never"
 
 
-DOMAIN: TypeAlias = domain_utils.SymbolicDomain | DomainAccessDescriptor | tuple["DOMAIN", ...]
-ACCESSED_DOMAINS: TypeAlias = dict[str, DOMAIN]
+NonTupleDomainAccess: TypeAlias = domain_utils.SymbolicDomain | DomainAccessDescriptor
+#: The domain can also be a tuple of domains, usually this only occurs for scan operators returning
+#: a tuple since other occurrences for tuples are removed before domain inference. This is
+#: however not a requirement of the pass and `make_tuple(vertex_field, edge_field)` infers just
+#: fine to a tuple of a vertex and an edge domain.
+DomainAccess: TypeAlias = NonTupleDomainAccess | tuple["DomainAccess", ...]
+AccessedDomains: TypeAlias = dict[str, DomainAccess]
 
 
 class InferenceOptions(typing.TypedDict):
@@ -83,7 +92,7 @@ def _domain_union(
         return DomainAccessDescriptor.UNKNOWN
 
     filtered_domains: list[domain_utils.SymbolicDomain] = [
-        d  # type: ignore[misc]  # domain can never be unknown because as these cases are filtered above
+        d  # type: ignore[misc]  # domain can never be unknown as these cases are filtered above
         for d in domains
         if d != DomainAccessDescriptor.NEVER
     ]
@@ -92,7 +101,9 @@ def _domain_union(
     return domain_utils.domain_union(*filtered_domains)
 
 
-def _canonicalize_domain_structure(d1: DOMAIN, d2: DOMAIN) -> tuple[DOMAIN, DOMAIN]:
+def _canonicalize_domain_structure(
+    d1: DomainAccess, d2: DomainAccess
+) -> tuple[DomainAccess, DomainAccess]:
     """
     Given two domains or composites thereof, canonicalize their structure.
 
@@ -133,9 +144,9 @@ def _canonicalize_domain_structure(d1: DOMAIN, d2: DOMAIN) -> tuple[DOMAIN, DOMA
 
 
 def _merge_domains(
-    original_domains: ACCESSED_DOMAINS,
-    additional_domains: ACCESSED_DOMAINS,
-) -> ACCESSED_DOMAINS:
+    original_domains: AccessedDomains,
+    additional_domains: AccessedDomains,
+) -> AccessedDomains:
     new_domains = {**original_domains}
 
     for key, domain in additional_domains.items():
@@ -150,20 +161,26 @@ def _merge_domains(
 def _extract_accessed_domains(
     stencil: itir.Expr,
     input_ids: list[str],
-    target_domain: domain_utils.SymbolicDomain | DomainAccessDescriptor,
+    input_types: list[Optional[ts.TypeSpec]],
+    target_domain: NonTupleDomainAccess,
     offset_provider: common.OffsetProvider,
     symbolic_domain_sizes: Optional[dict[str, str]],
-    allow_uninferred: bool,
-) -> ACCESSED_DOMAINS:
-    accessed_domains: dict[str, domain_utils.SymbolicDomain | DomainAccessDescriptor] = {}
+) -> dict[str, NonTupleDomainAccess]:
+    accessed_domains: dict[str, NonTupleDomainAccess] = {}
 
     shifts_results = trace_shifts.trace_stencil(stencil, num_args=len(input_ids))
 
-    for in_field_id, shifts_list in zip(input_ids, shifts_results, strict=True):
+    for input_id, input_type, shifts_list in zip(
+        input_ids, input_types, shifts_results, strict=True
+    ):
+        if isinstance(
+            input_type, ts.ScalarType
+        ):  # TODO: only do loop body when field instead (requires complete type information)
+            continue
         # TODO(tehrengruber): Dynamic shifts are not supported by `SymbolicDomain.translate`. Use
         #  special `UNKNOWN` marker for them until we have implemented a proper solution.
         if any(s == trace_shifts.Sentinel.VALUE for shift in shifts_list for s in shift):
-            accessed_domains[in_field_id] = DomainAccessDescriptor.UNKNOWN
+            accessed_domains[input_id] = DomainAccessDescriptor.UNKNOWN
             continue
 
         new_domains = [
@@ -174,21 +191,21 @@ def _extract_accessed_domains(
             else target_domain
             for shift in shifts_list
         ]
-        accessed_domains[in_field_id] = _domain_union(
-            accessed_domains.get(in_field_id, DomainAccessDescriptor.NEVER), *new_domains
+        accessed_domains[input_id] = _domain_union(
+            accessed_domains.get(input_id, DomainAccessDescriptor.NEVER), *new_domains
         )
 
-    return typing.cast(ACCESSED_DOMAINS, accessed_domains)
+    return accessed_domains
 
 
 def _infer_as_fieldop(
     applied_fieldop: itir.FunCall,
-    target_domain: DOMAIN,
+    target_domain: DomainAccess,
     *,
     offset_provider: common.OffsetProvider,
     symbolic_domain_sizes: Optional[dict[str, str]],
     allow_uninferred: bool,
-) -> tuple[itir.FunCall, ACCESSED_DOMAINS]:
+) -> tuple[itir.FunCall, AccessedDomains]:
     assert isinstance(applied_fieldop, itir.FunCall)
     assert cpm.is_call_to(applied_fieldop.fun, "as_fieldop")
     if not allow_uninferred and target_domain is DomainAccessDescriptor.NEVER:
@@ -196,10 +213,7 @@ def _infer_as_fieldop(
     # FIXME[#1582](tehrengruber): Temporary solution for `tuple_get` on scan result. See `test_solve_triag`.
     if isinstance(target_domain, tuple):
         target_domain = _domain_union(*flatten_nested_tuple(target_domain))  # type: ignore[arg-type]  # mypy not smart enough
-    if not isinstance(target_domain, (domain_utils.SymbolicDomain, DomainAccessDescriptor)):
-        raise ValueError(
-            "'target_domain' needs to be a 'domain_utils.SymbolicDomain' or a 'DomainAccessDescriptor'."
-        )
+    assert isinstance(target_domain, (domain_utils.SymbolicDomain, DomainAccessDescriptor))
 
     # `as_fieldop(stencil)(inputs...)`
     stencil, inputs = applied_fieldop.fun.args[0], applied_fieldop.args
@@ -208,37 +222,44 @@ def _infer_as_fieldop(
     assert not isinstance(stencil, itir.Lambda) or len(stencil.params) == len(applied_fieldop.args)
 
     input_ids: list[str] = []
+    input_types: list[Optional[ts.TypeSpec]] = []
 
     # Assign ids for all inputs to `as_fieldop`. `SymRef`s stay as is, nested `as_fieldop` get a
     # temporary id.
     tmp_uid_gen = eve_utils.UIDGenerator(prefix="__dom_inf")
-    for in_field in inputs:
-        if isinstance(in_field, itir.FunCall) or isinstance(in_field, itir.Literal):
+    for input in inputs:
+        if isinstance(input, itir.FunCall) or isinstance(input, itir.Literal):
             id_ = tmp_uid_gen.sequential_id()
-        elif isinstance(in_field, itir.SymRef):
-            id_ = in_field.id
+        elif isinstance(input, itir.SymRef):
+            id_ = input.id
         else:
-            raise ValueError(f"Unsupported expression of type '{type(in_field)}'.")
+            raise ValueError(f"Unsupported expression of type '{type(input)}'.")
         input_ids.append(id_)
+        input_types.append(input.type)
 
-    inputs_accessed_domains: ACCESSED_DOMAINS = _extract_accessed_domains(
-        stencil, input_ids, target_domain, offset_provider, symbolic_domain_sizes, allow_uninferred
+    inputs_accessed_domains: dict[str, NonTupleDomainAccess] = _extract_accessed_domains(
+        stencil, input_ids, input_types, target_domain, offset_provider, symbolic_domain_sizes
     )
 
     # Recursively infer domain of inputs and update domain arg of nested `as_fieldop`s
-    accessed_domains: ACCESSED_DOMAINS = {}
+    accessed_domains: AccessedDomains = {}
     transformed_inputs: list[itir.Expr] = []
-    for in_field_id, in_field in zip(input_ids, inputs):
-        transformed_input, accessed_domains_tmp = infer_expr(
-            in_field,
-            inputs_accessed_domains[in_field_id],
-            offset_provider=offset_provider,
-            symbolic_domain_sizes=symbolic_domain_sizes,
-            allow_uninferred=allow_uninferred,
-        )
-        transformed_inputs.append(transformed_input)
+    for input_id, input_type, input in zip(input_ids, input_types, inputs):
+        if isinstance(
+            input_type, ts.ScalarType
+        ):  # TODO: only do loop body when field instead (requires complete type information)
+            transformed_inputs.append(input)
+        else:
+            transformed_input, accessed_domains_tmp = infer_expr(
+                input,
+                inputs_accessed_domains[input_id],
+                offset_provider=offset_provider,
+                symbolic_domain_sizes=symbolic_domain_sizes,
+                allow_uninferred=allow_uninferred,
+            )
+            transformed_inputs.append(transformed_input)
 
-        accessed_domains = _merge_domains(accessed_domains, accessed_domains_tmp)
+            accessed_domains = _merge_domains(accessed_domains, accessed_domains_tmp)
 
     if not isinstance(target_domain, DomainAccessDescriptor):
         target_domain_expr = domain_utils.SymbolicDomain.as_expr(target_domain)
@@ -257,9 +278,9 @@ def _infer_as_fieldop(
 
 def _infer_let(
     let_expr: itir.FunCall,
-    input_domain: DOMAIN,
+    input_domain: DomainAccess,
     **kwargs: Unpack[InferenceOptions],
-) -> tuple[itir.FunCall, ACCESSED_DOMAINS]:
+) -> tuple[itir.FunCall, AccessedDomains]:
     assert cpm.is_let(let_expr)
     assert isinstance(let_expr.fun, itir.Lambda)  # just to make mypy happy
     let_params = {param_sym.id for param_sym in let_expr.fun.params}
@@ -272,15 +293,20 @@ def _infer_let(
 
     transformed_calls_args: list[itir.Expr] = []
     for param, arg in zip(let_expr.fun.params, let_expr.args, strict=True):
-        transformed_calls_arg, accessed_domains_arg = infer_expr(
-            arg,
-            accessed_domains_let_args.get(
-                param.id,
-                DomainAccessDescriptor.NEVER,
-            ),
-            **kwargs,
-        )
-        accessed_domains_outer = _merge_domains(accessed_domains_outer, accessed_domains_arg)
+        if isinstance(
+            arg.type, ts.ScalarType
+        ):  # TODO: only do loop body when field instead (requires complete type information)
+            transformed_calls_arg = arg
+        else:
+            transformed_calls_arg, accessed_domains_arg = infer_expr(
+                arg,
+                accessed_domains_let_args.get(
+                    param.id,
+                    DomainAccessDescriptor.NEVER,
+                ),
+                **kwargs,
+            )
+            accessed_domains_outer = _merge_domains(accessed_domains_outer, accessed_domains_arg)
         transformed_calls_args.append(transformed_calls_arg)
 
     transformed_call = im.let(
@@ -295,12 +321,12 @@ def _infer_let(
 
 def _infer_make_tuple(
     expr: itir.Expr,
-    domain: DOMAIN,
+    domain: DomainAccess,
     **kwargs: Unpack[InferenceOptions],
-) -> tuple[itir.Expr, ACCESSED_DOMAINS]:
+) -> tuple[itir.Expr, AccessedDomains]:
     assert cpm.is_call_to(expr, "make_tuple")
     infered_args_expr = []
-    actual_domains: ACCESSED_DOMAINS = {}
+    actual_domains: AccessedDomains = {}
     if not isinstance(domain, tuple):
         # promote domain to a tuple of domains such that it has the same structure as
         # the expression
@@ -322,11 +348,11 @@ def _infer_make_tuple(
 
 def _infer_tuple_get(
     expr: itir.Expr,
-    domain: DOMAIN,
+    domain: DomainAccess,
     **kwargs: Unpack[InferenceOptions],
-) -> tuple[itir.Expr, ACCESSED_DOMAINS]:
+) -> tuple[itir.Expr, AccessedDomains]:
     assert cpm.is_call_to(expr, "tuple_get")
-    actual_domains: ACCESSED_DOMAINS = {}
+    actual_domains: AccessedDomains = {}
     idx_expr, tuple_arg = expr.args
     assert isinstance(idx_expr, itir.Literal)
     idx = int(idx_expr.value)
@@ -342,12 +368,12 @@ def _infer_tuple_get(
 
 def _infer_if(
     expr: itir.Expr,
-    domain: DOMAIN,
+    domain: DomainAccess,
     **kwargs: Unpack[InferenceOptions],
-) -> tuple[itir.Expr, ACCESSED_DOMAINS]:
+) -> tuple[itir.Expr, AccessedDomains]:
     assert cpm.is_call_to(expr, "if_")
     infered_args_expr = []
-    actual_domains: ACCESSED_DOMAINS = {}
+    actual_domains: AccessedDomains = {}
     cond, true_val, false_val = expr.args
     for arg in [true_val, false_val]:
         infered_arg_expr, actual_domains_arg = infer_expr(arg, domain, **kwargs)
@@ -359,9 +385,9 @@ def _infer_if(
 
 def _infer_expr(
     expr: itir.Expr,
-    domain: DOMAIN,
+    domain: DomainAccess,
     **kwargs: Unpack[InferenceOptions],
-) -> tuple[itir.Expr, ACCESSED_DOMAINS]:
+) -> tuple[itir.Expr, AccessedDomains]:
     if isinstance(expr, itir.SymRef):
         return expr, {str(expr.id): domain}
     elif isinstance(expr, itir.Literal):
@@ -388,12 +414,12 @@ def _infer_expr(
 
 def infer_expr(
     expr: itir.Expr,
-    domain: DOMAIN,
+    domain: DomainAccess,
     *,
     offset_provider: common.OffsetProvider,
     symbolic_domain_sizes: Optional[dict[str, str]] = None,
     allow_uninferred: bool = False,
-) -> tuple[itir.Expr, ACCESSED_DOMAINS]:
+) -> tuple[itir.Expr, AccessedDomains]:
     """
     Infer the domain of all field subexpressions of `expr`.
 
@@ -406,7 +432,7 @@ def infer_expr(
     - symbolic_domain_sizes: A dictionary mapping axes names, e.g., `I`, `Vertex`, to a symbol
       name that evaluates to the length of that axis.
     - allow_uninferred: Allow `as_fieldop` expressions whose domain is either unknown (e.g.
-      because of a dynamic shift) or empty.
+      because of a dynamic shift) or never accessed.
 
     Returns:
       A tuple containing the inferred expression with all applied `as_fieldop` (that are accessed)
