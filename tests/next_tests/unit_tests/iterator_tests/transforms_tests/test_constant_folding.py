@@ -49,30 +49,30 @@ def test_constant_folding_minimum():
 
 
 def test_constant_folding_maximum_literal_plus():
-    # testee = im.call("maximum")(im.call("maximum")(
-    #     im.ref("__out_size_1"), im.literal_from_value(1)),
-    #      im.literal_from_value(1))
-    # expected = im.call("maximum")(
-    #     im.ref("__out_size_1"), im.literal_from_value(1))
-    # actual = ConstantFolding.apply(testee)
-    # assert actual == expected
-    #
-    # testee = im.call("maximum")(im.call("maximum")(
-    #     im.literal_from_value(1), im.ref("__out_size_1")),
-    #     im.literal_from_value(1))
-    # expected = im.call("maximum")(
-    #     im.ref("__out_size_1"), im.literal_from_value(1))
-    # actual = ConstantFolding.apply(testee)
-    # assert actual == expected
-    #
-    # testee = im.call("maximum")(im.call("maximum")(
-    #     im.literal_from_value(1), im.ref("__out_size_1")),
-    #     im.call("maximum")(
-    #         im.literal_from_value(1), im.ref("__out_size_1")))
-    # expected = im.call("maximum")(im.literal_from_value(1),
-    #     im.ref("__out_size_1"))
-    # actual = ConstantFolding.apply(testee)
-    # assert actual == expected
+    testee = im.call("maximum")(im.call("maximum")(
+        im.ref("__out_size_1"), im.literal_from_value(1)),
+         im.literal_from_value(1))
+    expected = im.call("maximum")(
+        im.ref("__out_size_1"), im.literal_from_value(1))
+    actual = ConstantFolding.apply(testee)
+    assert actual == expected
+
+    testee = im.call("maximum")(im.call("maximum")(
+        im.literal_from_value(1), im.ref("__out_size_1")),
+        im.literal_from_value(1))
+    expected = im.call("maximum")(
+        im.ref("__out_size_1"), im.literal_from_value(1))
+    actual = ConstantFolding.apply(testee)
+    assert actual == expected
+
+    testee = im.call("maximum")(im.call("maximum")(
+        im.literal_from_value(1), im.ref("__out_size_1")),
+        im.call("maximum")(
+            im.literal_from_value(1), im.ref("__out_size_1")))
+    expected = im.call("maximum")(im.literal_from_value(1),
+        im.ref("__out_size_1"))
+    actual = ConstantFolding.apply(testee)
+    assert actual == expected
 
     testee = im.call("maximum")(
         im.call("maximum")(im.literal_from_value(1), im.ref("__out_size_1")),
