@@ -127,7 +127,7 @@ class ConstantFolding(PreserveLocationVisitor, NodeTranslator):
         if (
             isinstance(new_node, ir.FunCall)
             and isinstance(new_node.fun, ir.SymRef)
-            and len(new_node.args) > 0
+            and len(new_node.args) == 2
         ):
             match = False
             if isinstance(new_node.args[0], ir.FunCall) and isinstance(
