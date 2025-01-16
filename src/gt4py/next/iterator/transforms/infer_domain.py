@@ -227,15 +227,15 @@ def _infer_as_fieldop(
     # Assign ids for all inputs to `as_fieldop`. `SymRef`s stay as is, nested `as_fieldop` get a
     # temporary id.
     tmp_uid_gen = eve_utils.UIDGenerator(prefix="__dom_inf")
-    for input in inputs:
-        if isinstance(input, itir.FunCall) or isinstance(input, itir.Literal):
+    for input_ in inputs:
+        if isinstance(input_, itir.FunCall) or isinstance(input_, itir.Literal):
             id_ = tmp_uid_gen.sequential_id()
-        elif isinstance(input, itir.SymRef):
-            id_ = input.id
+        elif isinstance(input_, itir.SymRef):
+            id_ = input_.id
         else:
-            raise ValueError(f"Unsupported expression of type '{type(input)}'.")
+            raise ValueError(f"Unsupported expression of type '{type(input_)}'.")
         input_ids.append(id_)
-        input_types.append(input.type)
+        input_types.append(input_.type)
 
     inputs_accessed_domains: dict[str, NonTupleDomainAccess] = _extract_accessed_domains(
         stencil, input_ids, input_types, target_domain, offset_provider, symbolic_domain_sizes
@@ -244,14 +244,14 @@ def _infer_as_fieldop(
     # Recursively infer domain of inputs and update domain arg of nested `as_fieldop`s
     accessed_domains: AccessedDomains = {}
     transformed_inputs: list[itir.Expr] = []
-    for input_id, input_type, input in zip(input_ids, input_types, inputs):
+    for input_id, input_type, input_ in zip(input_ids, input_types, inputs):
         if isinstance(
             input_type, ts.ScalarType
         ):  # TODO: only do loop body when field instead (requires complete type information)
-            transformed_inputs.append(input)
+            transformed_inputs.append(input_)
         else:
             transformed_input, accessed_domains_tmp = infer_expr(
-                input,
+                input_,
                 inputs_accessed_domains[input_id],
                 offset_provider=offset_provider,
                 symbolic_domain_sizes=symbolic_domain_sizes,
