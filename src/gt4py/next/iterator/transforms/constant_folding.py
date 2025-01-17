@@ -68,7 +68,7 @@ class ConstantFolding(PreserveLocationVisitor, NodeTranslator):
                 if new_node.args[0].args[0] == new_node.args[1].args[0]:
                     new_node = im.plus(
                         new_node.args[0].args[0],
-                        ConstantFolding.apply(
+                        self.visit(
                             im.call(new_node.fun.id)(
                                 im.call(new_node.args[0].fun.id)(0, new_node.args[0].args[1]),
                                 im.call(new_node.args[1].fun.id)(0, new_node.args[1].args[1]),
@@ -149,6 +149,6 @@ class ConstantFolding(PreserveLocationVisitor, NodeTranslator):
                 if fun_call_match:
                     new_node = im.plus(
                         fun_call_sym_ref,
-                        ConstantFolding.apply(im.call(new_node.fun.id)(fun_call_literal, literal)),
+                        self.visit(im.call(new_node.fun.id)(fun_call_literal, literal)),
                     )
         return new_node
