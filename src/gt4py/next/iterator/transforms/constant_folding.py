@@ -20,8 +20,8 @@ class ConstantFolding(PreserveLocationVisitor, NodeTranslator):
         # visit depth-first such that nested constant expressions (e.g. `(1+2)+3`) are properly folded
         new_node = self.generic_visit(node)
 
+        # `minimum(a, a)` -> `a`
         if cpm.is_call_to(new_node, ("minimum", "maximum")):
-            # `minimum(a, a)` -> `a`
             if new_node.args[0] == new_node.args[1]:
                 new_node = new_node.args[0]
         # `maximum(maximum(__out_size_1, 1), maximum(1, __out_size_1))` -> `maximum(__out_size_1, 1)`
@@ -98,9 +98,7 @@ class ConstantFolding(PreserveLocationVisitor, NodeTranslator):
                         elif fun_call.fun.id == "minus":
                             new_node = sym_ref if int(fun_call.args[1].value) >= 0 else fun_call
         # `if_(True, true_branch, false_branch)` -> `true_branch`
-        if cpm.is_call_to(new_node, "if_") and isinstance(
-            new_node.args[0], ir.Literal
-        ):
+        if cpm.is_call_to(new_node, "if_") and isinstance(new_node.args[0], ir.Literal):
             if new_node.args[0].value == "True":
                 new_node = new_node.args[1]
             else:
@@ -124,11 +122,7 @@ class ConstantFolding(PreserveLocationVisitor, NodeTranslator):
             except ValueError:
                 pass  # happens for inf and neginf
         # `__out_size_1 + 1 + 1` -> `__out_size_1 + 2`
-        if (
-            isinstance(new_node, ir.FunCall)
-            and isinstance(new_node.fun, ir.SymRef)
-            and len(new_node.args) == 2
-        ):
+        if cpm.is_call_to(new_node, ("plus", "minus")):
             match = False
             if isinstance(new_node.args[0], ir.FunCall) and isinstance(
                 new_node.args[1], ir.Literal
@@ -141,8 +135,20 @@ class ConstantFolding(PreserveLocationVisitor, NodeTranslator):
                 match = True
                 literal, fun_call = new_node.args
             if match and cpm.is_call_to(fun_call, ("plus", "minus")):
-                new_node = im.plus(
-                    fun_call.args[0],
-                    ConstantFolding.apply(im.call(fun_call.fun.id)(fun_call.args[1], literal)),
-                )
+                fun_call_match = False
+                if isinstance(fun_call.args[0], ir.SymRef) and isinstance(
+                    fun_call.args[1], ir.Literal
+                ):
+                    fun_call_sym_ref, fun_call_literal = fun_call.args
+                    fun_call_match = True
+                elif isinstance(fun_call.args[0], ir.Literal) and isinstance(
+                    fun_call.args[1], ir.SymRef
+                ):
+                    fun_call_literal, fun_call_sym_ref = new_node.args
+                    fun_call_match = True
+                if fun_call_match:
+                    new_node = im.plus(
+                        fun_call_sym_ref,
+                        ConstantFolding.apply(im.call(new_node.fun.id)(fun_call_literal, literal)),
+                    )
         return new_node
