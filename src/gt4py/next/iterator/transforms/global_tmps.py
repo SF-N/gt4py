@@ -21,6 +21,7 @@ from gt4py.next.iterator.ir_utils import (
 )
 from gt4py.next.iterator.ir_utils.domain_utils import SymbolicDomain, SymbolicRange
 from gt4py.next.iterator.transforms import collapse_tuple, cse, infer_domain, inline_lambdas
+from gt4py.next.iterator.transforms.constant_folding import ConstantFolding
 from gt4py.next.iterator.type_system import inference as type_inference
 from gt4py.next.type_system import type_info, type_specifications as ts
 
@@ -52,7 +53,7 @@ def _transform_if(
 def _fix_domain_starts(domain: SymbolicDomain):
     new_ranges = {}
     for dim, range_ in domain.ranges.items():
-        new_ranges[dim] = SymbolicRange(start=im.call("maximum")(0, range_.start), stop=range_.stop)
+        new_ranges[dim] = SymbolicRange(start=ConstantFolding.apply(im.call("maximum")(0, range_.start)), stop=range_.stop)
     return SymbolicDomain(grid_type=domain.grid_type, ranges=new_ranges)
 
 
