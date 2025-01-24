@@ -17,7 +17,7 @@ from gt4py import eve
 from gt4py.eve import concepts
 from gt4py.eve.extended_typing import Any, Callable, Optional, TypeVar, Union
 from gt4py.next import common
-from gt4py.next.iterator import ir as itir
+from gt4py.next.iterator import builtins, ir as itir
 from gt4py.next.iterator.ir_utils.common_pattern_matcher import is_call_to
 from gt4py.next.iterator.type_system import type_specifications as it_ts, type_synthesizer
 from gt4py.next.type_system import type_info, type_specifications as ts
@@ -147,7 +147,7 @@ class ObservableTypeSynthesizer(type_synthesizer.TypeSynthesizer):
     >>> float_type = ts.ScalarType(kind=ts.ScalarKind.FLOAT64)
     >>> int_type = ts.ScalarType(kind=ts.ScalarKind.INT64)
     >>> power(float_type, int_type)
-    ScalarType(kind=<ScalarKind.FLOAT64: 1064>, shape=None)
+    ScalarType(kind=<ScalarKind.FLOAT64: 11>, shape=None)
 
     Now, consider a simple lambda function that squares its argument using the power builtin. A
     type synthesizer for this function is simple to formulate, but merely gives us the return
@@ -159,7 +159,7 @@ class ObservableTypeSynthesizer(type_synthesizer.TypeSynthesizer):
     ...     type_synthesizer=lambda base: power(base, int_type)
     ... )
     >>> square_func_type_synthesizer(float_type, offset_provider_type={})
-    ScalarType(kind=<ScalarKind.FLOAT64: 1064>, shape=None)
+    ScalarType(kind=<ScalarKind.FLOAT64: 11>, shape=None)
 
     Note that without a corresponding call the function itself can not be fully typed and as such
     the type inference algorithm has to defer typing until then. This task is handled transparently
@@ -173,7 +173,7 @@ class ObservableTypeSynthesizer(type_synthesizer.TypeSynthesizer):
     ...     store_inferred_type_in_node=True,
     ... )
     >>> o_type_synthesizer(float_type, offset_provider_type={})
-    ScalarType(kind=<ScalarKind.FLOAT64: 1064>, shape=None)
+    ScalarType(kind=<ScalarKind.FLOAT64: 11>, shape=None)
     >>> square_func.type == ts.FunctionType(
     ...     pos_only_args=[float_type], pos_or_kw_args={}, kw_only_args={}, returns=float_type
     ... )
@@ -275,8 +275,8 @@ def _get_dimensions_from_types(types) -> dict[str, common.Dimension]:
         if isinstance(obj, common.Dimension):
             yield obj
         elif isinstance(obj, ts.TypeSpec):
-            for field in dataclasses.fields(obj.__class__):
-                yield from _get_dimensions(getattr(obj, field.name))
+            for field in obj.__datamodel_fields__.keys():
+                yield from _get_dimensions(getattr(obj, field))
         elif isinstance(obj, collections.abc.Mapping):
             for el in obj.values():
                 yield from _get_dimensions(el)
@@ -448,7 +448,12 @@ class ITIRTypeInference(eve.NodeTranslator):
         Contrary to the regular inference, this method does not descend into already typed sub-nodes
         and can be used as a lightweight way to restore type information during a pass.
 
+<<<<<<< HEAD
         Note that this function is stateful, which is usually desired, and more performant.
+=======
+        Note that this function alters the input node, which is usually desired, and more
+        performant.
+>>>>>>> constant_folding_main
 
         Arguments:
             node: The :class:`itir.Node` to infer the types of.
@@ -512,7 +517,7 @@ class ITIRTypeInference(eve.NodeTranslator):
         assert domain.dims != "unknown"
         assert node.dtype
         return type_info.apply_to_primitive_constituents(
-            lambda dtype: ts.FieldType(dims=domain.dims, dtype=dtype),  # type: ignore[arg-type]  # ensured by domain.dims != "unknown" above
+            lambda dtype: ts.FieldType(dims=domain.dims, dtype=dtype),
             node.dtype,
         )
 
@@ -559,12 +564,16 @@ class ITIRTypeInference(eve.NodeTranslator):
     def visit_OffsetLiteral(
         self, node: itir.OffsetLiteral, **kwargs
     ) -> it_ts.OffsetLiteralType | ts.DeferredType:
+
+        # `self.dimensions` not available in re-inference mode. Skip since we don't care anyway.
         if self.reinfer:
             return ts.DeferredType(constraint=it_ts.OffsetLiteralType)
 
         if _is_representable_as_int(node.value):
             return it_ts.OffsetLiteralType(
-                value=ts.ScalarType(kind=getattr(ts.ScalarKind, itir.INTEGER_INDEX_BUILTIN.upper()))
+                value=ts.ScalarType(
+                    kind=getattr(ts.ScalarKind, builtins.INTEGER_INDEX_BUILTIN.upper())
+                )
             )
         else:
             assert isinstance(self.dimensions, dict)
@@ -614,7 +623,7 @@ class ITIRTypeInference(eve.NodeTranslator):
             self.visit(value, ctx=ctx)  # ensure types in value are also inferred
             assert (
                 isinstance(type_constructor, itir.SymRef)
-                and type_constructor.id in itir.TYPEBUILTINS
+                and type_constructor.id in builtins.TYPE_BUILTINS
             )
             return ts.ScalarType(kind=getattr(ts.ScalarKind, type_constructor.id.upper()))
 

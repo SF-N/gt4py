@@ -60,7 +60,7 @@ class AssignmentKind(eve.StrEnum):
 
 @enum.unique
 class UnaryOperator(eve.StrEnum):
-    """Unary operator indentifier."""
+    """Unary operator identifier."""
 
     POS = "+"
     NEG = "-"
@@ -229,8 +229,8 @@ class LevelMarker(eve.StrEnum):
 
 @enum.unique
 class ExprKind(eve.IntEnum):
-    SCALAR: ExprKind = typing.cast("ExprKind", enum.auto())
-    FIELD: ExprKind = typing.cast("ExprKind", enum.auto())
+    SCALAR = typing.cast("ExprKind", enum.auto())
+    FIELD = typing.cast("ExprKind", enum.auto())
 
 
 class LocNode(eve.Node):

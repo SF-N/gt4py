@@ -21,10 +21,7 @@ from gt4py.next.iterator.transforms import (
     merge_let,
     trace_shifts,
 )
-from gt4py.next.iterator.type_system import (
-    inference as type_inference,
-    type_specifications as it_ts,
-)
+from gt4py.next.iterator.type_system import inference as type_inference
 from gt4py.next.type_system import type_info, type_specifications as ts
 
 
@@ -171,7 +168,7 @@ def fuse_as_fieldop(
             if arg.type and not isinstance(arg.type, ts.DeferredType):
                 assert isinstance(arg.type, ts.TypeSpec)
                 dtype = type_info.apply_to_primitive_constituents(type_info.extract_dtype, arg.type)
-                assert not isinstance(dtype, it_ts.ListType)
+                assert not isinstance(dtype, ts.ListType)
             new_param: str
             if isinstance(
                 arg, itir.SymRef
@@ -365,13 +362,24 @@ class FuseAsFieldOp(eve.NodeTranslator):
             args: list[itir.Expr] = node.args
             shifts = trace_shifts.trace_stencil(stencil, num_args=len(args))
 
-            eligible_args = [
-                _arg_inline_predicate(arg, arg_shifts)
-                for arg, arg_shifts in zip(args, shifts, strict=True)
-            ]
-            if any(eligible_args):
-                return self.visit(
-                    fuse_as_fieldop(node, eligible_args, uids=self.uids),
-                    **{**kwargs, "recurse": False},
+
+            eligible_args = []
+            for arg, arg_shifts in zip(args, shifts, strict=True):
+                assert isinstance(arg.type, ts.TypeSpec)
+                dtype = type_info.apply_to_primitive_constituents(type_info.extract_dtype, arg.type)
+                # TODO(tehrengruber): make this configurable
+                eligible_args.append(
+                    _is_tuple_expr_of_literals(arg)
+                    or (
+                        isinstance(arg, itir.FunCall)
+                        and (
+                            (
+                                cpm.is_call_to(arg.fun, "as_fieldop")
+                                and isinstance(arg.fun.args[0], itir.Lambda)
+                            )
+                            or cpm.is_call_to(arg, "if_")
+                        )
+                        and (isinstance(dtype, ts.ListType) or len(arg_shifts) <= 1)
+                    )
                 )
         return node
