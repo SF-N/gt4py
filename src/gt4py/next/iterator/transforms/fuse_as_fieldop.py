@@ -345,9 +345,15 @@ class FuseAsFieldOp(
         if not uids:
             uids = eve_utils.UIDGenerator()
 
-        return cls(uids=uids, enabled_transformations=enabled_transformations).visit(
+        new_node = cls(uids=uids, enabled_transformations=enabled_transformations).visit(
             node, within_set_at_expr=within_set_at_expr
         )
+        new_node = type_inference.infer(
+            new_node,
+            offset_provider_type=offset_provider_type,
+            allow_undeclared_symbols=allow_undeclared_symbols,
+        )
+        return new_node
 
     def transform_fuse_make_tuple(self, node: itir.Node, **kwargs):
         if not cpm.is_call_to(node, "make_tuple"):
@@ -429,6 +435,7 @@ class FuseAsFieldOp(
         return None
 
     def transform_inline_let_vars_opcount_preserving(self, node: itir.Node, **kwargs):
+        return None
         # when multiple `as_fieldop` calls are fused that use the same argument, this argument
         # might become referenced once only. In order to be able to continue fusing such arguments
         # try inlining here.
