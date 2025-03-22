@@ -17,7 +17,6 @@ from gt4py.next.iterator.ir_utils import ir_makers as im
 from gt4py.next.iterator.transforms import trace_shifts
 from gt4py.next.iterator.transforms.inline_lambdas import inline_lambda
 from gt4py.next.iterator.transforms.inline_lifts import InlineLifts
-from gt4py.next.iterator.type_system import inference as type_inference
 
 
 def is_center_derefed_only(node: itir.Node) -> bool:

@@ -553,7 +553,7 @@ class NdArrayConnectivityField(  # type: ignore[misc] # for __ne__, __eq__
             assert common.UnitRange.is_finite(image_range)
 
             xp = self.array_ns
-            slices = _hyperslice(self._ndarray, image_range, xp, self.skip_value)
+            slices = _hyperslice(self._ndarray, image_range, xp, self.skip_value, contiguous=True)
             if slices is None:
                 raise ValueError("Restriction generates non-contiguous dimensions.")
 
@@ -741,6 +741,7 @@ def _hyperslice(
     image_range: common.UnitRange,
     xp: ModuleType,
     skip_value: Optional[core_defs.IntegralScalar] = None,
+    contiguous: bool = False,
 ) -> Optional[tuple[slice, ...]]:
     """
     Return the hypercube slice that contains all indices in `index_array` that are within `image_range`, or `None` if no such hypercube exists.
@@ -767,6 +768,8 @@ def _hyperslice(
     if skip_value is not None:
         ignore_mask = index_array == skip_value
         hcube |= ignore_mask[tuple(slices)]
+    if contiguous:
+        hcube = np.logical_or.reduce(hcube, axis=1)
     if not xp.all(hcube):
         return None
 
