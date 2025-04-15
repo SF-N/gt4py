@@ -19,6 +19,7 @@ from next_tests.integration_tests.feature_tests.ffront_tests.ffront_test_utils i
 )
 
 # TODO test non-Python int for embedded comparison
+# TODO test reverse operations 0 < KDim
 
 
 @pytest.mark.uses_frontend_concat_where
@@ -57,10 +58,10 @@ def test_concat_where(cartesian_case):
 #     @gtx.field_operator
 #     def testee(air: cases.IJKField) -> cases.IJKField:
 #         return concat_where(KDim > 0, air, 0)
-
+#
 #     out = cases.allocate(cartesian_case, testee, cases.RETURN)()
 #     air = cases.allocate(cartesian_case, testee, "air")()
-
+#
 #     k = np.arange(0, cartesian_case.default_sizes[KDim])
 #     ref = np.where(k[np.newaxis, np.newaxis, :] == 0, 0, air.asnumpy())
 #     cases.verify(cartesian_case, testee, air, out=out, ref=ref)

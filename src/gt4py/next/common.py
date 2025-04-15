@@ -418,9 +418,18 @@ def named_range(v: tuple[Dimension, RangeLike]) -> NamedRange:
     return NamedRange(v[0], unit_range(v[1]))
 
 
-# TODO should be somewhere else
+# The following classes are used in embedded to represent special domains
+# for implementing `concat_where`. They live here as they are coupled to
+# `Domain` and other classes in this file. Otherwise, we can't fix the import
+# cycles.
 @dataclasses.dataclass(frozen=True)
 class _Embedded1DDomain:
+    """
+    Represents a 1D domain with a single dimension and range.
+
+    This class is only used internally when constructing a domain from a Dimension comparison.
+    """
+
     dim: Dimension
     unit_range: UnitRange
 
@@ -436,8 +445,12 @@ class _Embedded1DDomain:
 
 @dataclasses.dataclass(frozen=True)
 class _EmbeddedDomainTuple:
-    first: Self
-    second: Self
+    """
+    Baseclass to represent a Union or Intersection of two '_EmbeddedDomain's.
+    """
+
+    first: _EmbeddedDomain
+    second: _EmbeddedDomain
 
     def __and__(self, other: _EmbeddedDomain) -> _DomainIntersection:
         return _DomainIntersection(self, other)

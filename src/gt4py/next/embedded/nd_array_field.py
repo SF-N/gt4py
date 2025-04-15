@@ -901,47 +901,6 @@ def _concat(*fields: common.Field, dim: common.Dimension) -> common.Field:
     )
 
 
-# def _invert_domain(
-#     domains: common.Domain | tuple[common.Domain],
-# ) -> common.Domain | tuple[common.Domain, ...]:
-#     if not isinstance(domains, tuple):
-#         domains = (domains,)
-
-#     assert all(d.ndim == 1 for d in domains)
-#     dim = domains[0].dims[0]
-#     assert all(d.dims[0] == dim for d in domains)
-#     sorted_domains = sorted(domains, key=lambda d: d.ranges[0].start)
-
-#     result = []
-#     if domains[0].ranges[0].start is not common.Infinity.NEGATIVE:
-#         result.append(
-#             common.Domain(
-#                 dims=(dim,),
-#                 ranges=(common.UnitRange(common.Infinity.NEGATIVE, domains[0].ranges[0].start),),
-#             )
-#         )
-#     for i in range(len(sorted_domains) - 1):
-#         if sorted_domains[i].ranges[0].stop != sorted_domains[i + 1].ranges[0].start:
-#             result.append(
-#                 common.Domain(
-#                     dims=(dim,),
-#                     ranges=(
-#                         common.UnitRange(
-#                             sorted_domains[i].ranges[0].stop, sorted_domains[i + 1].ranges[0].start
-#                         ),
-#                     ),
-#                 )
-#             )
-#     if domains[-1].ranges[0].stop is not common.Infinity.POSITIVE:
-#         result.append(
-#             common.Domain(
-#                 dims=(dim,),
-#                 ranges=(common.UnitRange(domains[-1].ranges[0].stop, common.Infinity.POSITIVE),),
-#             )
-#         )
-#     return tuple(result)
-
-
 def _invert_domain(domain: common._Embedded1DDomain) -> common._EmbeddedDomain:
     if domain.unit_range.start is common.Infinity.NEGATIVE:
         return common._Embedded1DDomain(
