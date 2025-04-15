@@ -51,6 +51,21 @@ def test_concat_where(cartesian_case):
     cases.verify(cartesian_case, testee, ground, air, out=out, ref=ref)
 
 
+# TODO: creates infinite domain, requires function field in embedded
+# @pytest.mark.uses_frontend_concat_where
+# def test_concat_where_scalar(cartesian_case):
+#     @gtx.field_operator
+#     def testee(air: cases.IJKField) -> cases.IJKField:
+#         return concat_where(KDim > 0, air, 0)
+
+#     out = cases.allocate(cartesian_case, testee, cases.RETURN)()
+#     air = cases.allocate(cartesian_case, testee, "air")()
+
+#     k = np.arange(0, cartesian_case.default_sizes[KDim])
+#     ref = np.where(k[np.newaxis, np.newaxis, :] == 0, 0, air.asnumpy())
+#     cases.verify(cartesian_case, testee, air, out=out, ref=ref)
+
+
 @pytest.mark.uses_frontend_concat_where
 def test_concat_where_non_overlapping(cartesian_case):
     @gtx.field_operator
@@ -238,11 +253,10 @@ def test_lap_like(cartesian_case):
     def testee(
         input: cases.IJField, boundary: np.int32, shape: tuple[np.int32, np.int32]
     ) -> cases.IJField:
-        # TODO add support for multi-dimensional concat_where masks
         return concat_where(
-            (IDim == 0) | (IDim == shape[0] - 1),
+            (IDim == 0) | (IDim == shape[0] - 1) | (JDim == 0) | (JDim == shape[1] - 1),
             boundary,
-            concat_where((JDim == 0) | (JDim == shape[1] - 1), boundary, input),
+            input,
         )
 
     out = cases.allocate(cartesian_case, testee, cases.RETURN)()
@@ -256,6 +270,29 @@ def test_lap_like(cartesian_case):
     ref[:, 0] = boundary
     ref[-1, :] = boundary
     ref[:, -1] = boundary
+    ref[1:-1, 1:-1] = input.asnumpy()
+    cases.verify(cartesian_case, testee, input, boundary, out.domain.shape, out=out, ref=ref)
+
+
+@pytest.mark.uses_frontend_concat_where
+def test_lap_like_and(cartesian_case):
+    @gtx.field_operator
+    def testee(
+        input: cases.IJField, boundary: cases.IJField, shape: tuple[np.int32, np.int32]
+    ) -> cases.IJField:
+        return concat_where(
+            (IDim > 0) & (IDim < shape[0] - 1) & (JDim > 0) & (JDim < shape[1] - 1),
+            input,
+            boundary,
+        )
+
+    out = cases.allocate(cartesian_case, testee, cases.RETURN)()
+    input = cases.allocate(
+        cartesian_case, testee, "input", domain=out.domain.slice_at[1:-1, 1:-1]
+    )()
+    boundary = cases.allocate(cartesian_case, testee, "boundary", domain=out.domain)()
+
+    ref = boundary.asnumpy().copy()
     ref[1:-1, 1:-1] = input.asnumpy()
     cases.verify(cartesian_case, testee, input, boundary, out.domain.shape, out=out, ref=ref)
 
