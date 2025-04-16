@@ -12,6 +12,7 @@ import dataclasses
 import os
 import pathlib
 import subprocess
+import warnings
 
 from gt4py._core import definitions as core_defs
 from gt4py.next import config
@@ -23,7 +24,13 @@ from gt4py.next.otf.compilation.build_systems import cmake_lists
 def get_device_arch() -> str | None:
     if core_defs.CUPY_DEVICE_TYPE == core_defs.DeviceType.CUDA:
         # use `cp` from core_defs to avoid trying to re-import cupy
-        return core_defs.cp.cuda.Device(0).compute_capability  # type: ignore[attr-defined]
+        try:
+            return core_defs.cp.cuda.Device(0).compute_capability  # type: ignore[attr-defined]
+        except core_defs.cp.cuda.runtime.CUDARuntimeError as e:  # type: ignore[attr-defined]
+            warnings.warn(
+                UserWarning(f"Could not determine the CUDA compute capability: {e}"), stacklevel=2
+            )
+            return None
     elif core_defs.CUPY_DEVICE_TYPE == core_defs.DeviceType.ROCM:
         # TODO(egparedes): Implement this properly, either parsing the output of `$ rocminfo`
         # or using the HIP low level bindings.
@@ -83,6 +90,8 @@ class CMakeFactory(
         cmake_languages = [cmake_lists.Language(name="CXX")]
         if (src_lang := source.program_source.language) in [languages.CUDA, languages.HIP]:
             cmake_languages = [*cmake_languages, cmake_lists.Language(name=src_lang.__name__)]
+            if device_arch_flag := get_cmake_device_arch_option():
+                self.cmake_extra_flags.append(device_arch_flag)
         cmake_lists_src = cmake_lists.generate_cmakelists_source(
             name,
             source.library_deps,
@@ -149,21 +158,39 @@ class CMakeProject(
             self.root_path,
         )
 
+        self._write_configure_script()
+
+    @property
+    def _config_command(self) -> list[str]:
+        return [
+            "cmake",
+            "-G",
+            self.generator_name,
+            "-S",
+            str(self.root_path),
+            "-B",
+            str(self.root_path / "build"),
+            f"-DCMAKE_BUILD_TYPE={self.build_type.value}",
+            *self.extra_cmake_flags,
+        ]
+
+    def _write_configure_script(self) -> None:
+        # TODO(havogt): additionally we could store all `env` vars
+        configure_script_path = self.root_path / "configure.sh"
+        with configure_script_path.open("w") as build_script_pointer:
+            build_script_pointer.write("#!/bin/sh\n")
+            build_script_pointer.write(" ".join(self._config_command))
+        try:
+            configure_script_path.chmod(0o755)
+        except OSError:
+            # if setting permissions fails, it's not a problem
+            pass
+
     def _run_config(self) -> None:
         logfile = self.root_path / "log_config.txt"
         with logfile.open(mode="w") as log_file_pointer:
             subprocess.check_call(
-                [
-                    "cmake",
-                    "-G",
-                    self.generator_name,
-                    "-S",
-                    str(self.root_path),
-                    "-B",
-                    str(self.root_path / "build"),
-                    f"-DCMAKE_BUILD_TYPE={self.build_type.value}",
-                    *self.extra_cmake_flags,
-                ],
+                self._config_command,
                 stdout=log_file_pointer,
                 stderr=log_file_pointer,
             )

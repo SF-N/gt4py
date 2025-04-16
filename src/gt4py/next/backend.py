@@ -75,7 +75,7 @@ class Transforms(workflow.MultiWorkflow[INPUT_PAIR, stages.CompilableProgram]):
         default_factory=func_to_past.adapted_func_to_past_factory
     )
 
-    foast_to_itir: workflow.Workflow[AOT_FOP, itir.Expr] = dataclasses.field(
+    foast_to_itir: workflow.Workflow[AOT_FOP, itir.FunctionDefinition] = dataclasses.field(
         default_factory=foast_to_gtir.adapted_foast_to_gtir_factory
     )
 
@@ -157,7 +157,7 @@ class Backend(Generic[core_defs.DeviceTypeT]):
             args, kwargs = signature.convert_to_positional(program, *args, **kwargs)
         try:
             cprg = self._cache[id(program)]
-        except:
+        except Exception:
             cprg = self._cache[id(program)] = self.jit(program, *args, **kwargs)
         return cprg(*args, **kwargs)
 
