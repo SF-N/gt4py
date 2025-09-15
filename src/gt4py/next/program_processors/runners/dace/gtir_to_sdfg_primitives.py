@@ -16,7 +16,11 @@ from dace import subsets as dace_subsets
 
 from gt4py.next import common as gtx_common, utils as gtx_utils
 from gt4py.next.iterator import ir as gtir
-from gt4py.next.iterator.ir_utils import common_pattern_matcher as cpm, ir_makers as im
+from gt4py.next.iterator.ir_utils import (
+    common_pattern_matcher as cpm,
+    domain_utils,
+    ir_makers as im,
+)
 from gt4py.next.program_processors.runners.dace import (
     gtir_dataflow,
     gtir_domain,
@@ -262,7 +266,7 @@ def translate_as_fieldop(
 
     fun_node = node.fun
     assert len(fun_node.args) == 2
-    fieldop_expr, domain_expr = fun_node.args
+    fieldop_expr, _ = fun_node.args
 
     if cpm.is_call_to(fieldop_expr, "scan"):
         return translate_scan(node, ctx, sdfg_builder)
@@ -284,7 +288,7 @@ def translate_as_fieldop(
         )
 
     # parse the domain of the field operator
-    domain = gtir_domain.extract_domain(domain_expr)
+    domain = gtir_domain.extract_domain(node.annex.domain)
 
     # visit the list of arguments to be passed to the lambda expression
     fieldop_args = [_parse_fieldop_arg(arg, ctx, sdfg_builder, domain) for arg in node.args]
@@ -300,7 +304,7 @@ def translate_as_fieldop(
 def _construct_if_branch_output(
     ctx: gtir_to_sdfg.SubgraphContext,
     sdfg_builder: gtir_to_sdfg.SDFGBuilder,
-    field_domain: gtir.Expr,
+    field_domain: domain_utils.SymbolicDomain,
     sym: gtir.Sym,
     true_br: gtir_to_sdfg_types.FieldopData,
     false_br: gtir_to_sdfg_types.FieldopData,
@@ -541,12 +545,13 @@ def _get_data_nodes(
     sdfg: dace.SDFG,
     state: dace.SDFGState,
     sdfg_builder: gtir_to_sdfg.SDFGBuilder,
+    arg_name: str,
     data_name: str,
     data_type: ts.DataType,
 ) -> gtir_to_sdfg_types.FieldopResult:
     if isinstance(data_type, ts.FieldType):
         data_node = state.add_access(data_name)
-        return sdfg_builder.make_field(data_node, data_type)
+        return sdfg_builder.make_field(arg_name, data_node, data_type)
 
     elif isinstance(data_type, ts.ScalarType):
         if data_name in sdfg.symbols:
@@ -560,7 +565,7 @@ def _get_data_nodes(
     elif isinstance(data_type, ts.TupleType):
         symbol_tree = gtir_to_sdfg_utils.make_symbol_tree(data_name, data_type)
         return gtx_utils.tree_map(
-            lambda sym: _get_data_nodes(sdfg, state, sdfg_builder, sym.id, sym.type)
+            lambda sym: _get_data_nodes(sdfg, state, sdfg_builder, arg_name, sym.id, sym.type)
         )(symbol_tree)
 
     else:
@@ -735,7 +740,9 @@ def translate_symbol_ref(
     # Create new access node in current state. It is possible that multiple
     # access nodes are created in one state for the same data container.
     # We rely on the dace simplify pass to remove duplicated access nodes.
-    return _get_data_nodes(ctx.sdfg, ctx.state, sdfg_builder, symbol_name, gt_symbol_type)
+    return _get_data_nodes(
+        ctx.sdfg, ctx.state, sdfg_builder, symbol_name, symbol_name, gt_symbol_type
+    )
 
 
 if TYPE_CHECKING:

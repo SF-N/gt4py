@@ -16,8 +16,7 @@ import sympy
 from dace import subsets as dace_subsets
 
 from gt4py.next import common as gtx_common
-from gt4py.next.iterator import ir as gtir
-from gt4py.next.iterator.ir_utils import common_pattern_matcher as cpm, domain_utils
+from gt4py.next.iterator.ir_utils import domain_utils
 from gt4py.next.program_processors.runners.dace import gtir_to_sdfg_utils
 
 
@@ -41,44 +40,26 @@ FieldopDomain: TypeAlias = list[FieldopDomainRange]
 """Domain of a field operator represented as a list of `FieldopDomainRange` for each dimension."""
 
 
-def extract_domain(node: gtir.Expr) -> FieldopDomain:
+def extract_domain(node: domain_utils.SymbolicDomain) -> FieldopDomain:
     """
     Visits the domain of a field operator and returns a list of dimensions and
     the corresponding lower and upper bounds. The returned lower bound is inclusive,
     the upper bound is exclusive: [lower_bound, upper_bound[
     """
 
-    domain = []
-
-    if cpm.is_call_to(node, ("cartesian_domain", "unstructured_domain")):
-        for named_range in node.args:
-            assert cpm.is_call_to(named_range, "named_range")
-            assert len(named_range.args) == 3
-            axis = named_range.args[0]
-            assert isinstance(axis, gtir.AxisLiteral)
-            lower_bound, upper_bound = (
-                gtir_to_sdfg_utils.get_symbolic(arg) for arg in named_range.args[1:3]
-            )
-            dim = gtx_common.Dimension(axis.value, axis.kind)
-            domain.append(FieldopDomainRange(dim, lower_bound, upper_bound))
-
-    elif isinstance(node, domain_utils.SymbolicDomain):
-        for dim, drange in node.ranges.items():
-            domain.append(
-                FieldopDomainRange(
-                    dim,
-                    gtir_to_sdfg_utils.get_symbolic(drange.start),
-                    gtir_to_sdfg_utils.get_symbolic(drange.stop),
-                )
-            )
-
-    else:
-        raise ValueError(f"Invalid domain {node}.")
-
-    return domain
+    return [
+        FieldopDomainRange(
+            dim,
+            gtir_to_sdfg_utils.get_symbolic(drange.start),
+            gtir_to_sdfg_utils.get_symbolic(drange.stop),
+        )
+        for dim, drange in node.ranges.items()
+    ]
 
 
-def simplify_domain_expr(expr: sympy.Basic, domain: FieldopDomain) -> dace.symbolic.SymbolicType:
+def simplify_domain_expr(
+    expr: sympy.Basic, domain: domain_utils.SymbolicDomain
+) -> dace.symbolic.SymbolicType:
     """Simplifies a symbolic expression by applying constraints from domain range.
 
     Dace uses sympy for symbolic expressions in the SDFG. By applying assumptions
@@ -91,7 +72,7 @@ def simplify_domain_expr(expr: sympy.Basic, domain: FieldopDomain) -> dace.symbo
     Returns:
         A new symbolic expression.
     """
-    for dim_range in domain:
+    for dim_range in extract_domain(domain):
         # We want to enforce the constraint `ub = lb + size`. The actual constraint
         # is given by the assumption that the `size` variable is integer and non-negative.
         size = sympy.var(f"__gtir_{dim_range.dim.value}_size", integer=True, negative=False)
@@ -129,7 +110,7 @@ def get_domain_indices(
 
 def get_field_layout(
     field_domain: FieldopDomain,
-    target_domain: FieldopDomain,
+    target_domain: domain_utils.SymbolicDomain,
 ) -> tuple[list[gtx_common.Dimension], list[dace.symbolic.SymExpr], list[dace.symbolic.SymExpr]]:
     """
     Parse the field operator domain and generate the shape of the result field.

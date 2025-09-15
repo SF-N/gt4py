@@ -585,11 +585,11 @@ def translate_scan(
 
     fun_node = node.fun
     assert len(fun_node.args) == 2
-    scan_expr, domain_expr = fun_node.args
+    scan_expr, _ = fun_node.args
     assert cpm.is_call_to(scan_expr, "scan")
 
     # parse the domain of the scan field operator
-    domain = gtir_domain.extract_domain(domain_expr)
+    domain = gtir_domain.extract_domain(node.annex.domain)
 
     # parse scan parameters
     assert len(scan_expr.args) == 3

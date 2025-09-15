@@ -20,7 +20,7 @@ from dace import subsets as dace_subsets
 
 from gt4py.next import common as gtx_common, utils as gtx_utils
 from gt4py.next.iterator import ir as gtir
-from gt4py.next.iterator.ir_utils import common_pattern_matcher as cpm
+from gt4py.next.iterator.ir_utils import common_pattern_matcher as cpm, domain_utils
 from gt4py.next.program_processors.runners.dace import (
     gtir_domain,
     gtir_to_sdfg,
@@ -120,9 +120,9 @@ def _translate_concat_where_impl(
     ctx: gtir_to_sdfg.SubgraphContext,
     sdfg_builder: gtir_to_sdfg.SDFGBuilder,
     mask_domain: gtir_domain.FieldopDomain,
-    node_domain: gtir.Expr,
-    tb_node_domain: gtir.Expr,
-    fb_node_domain: gtir.Expr,
+    node_domain: domain_utils.SymbolicDomain,
+    tb_node_domain: domain_utils.SymbolicDomain,
+    fb_node_domain: domain_utils.SymbolicDomain,
     tb_field: gtir_to_sdfg_types.FieldopData,
     fb_field: gtir_to_sdfg_types.FieldopData,
 ) -> gtir_to_sdfg_types.FieldopData:
@@ -466,7 +466,7 @@ def translate_concat_where(
     # we extract the dimension along which we need to concatenate the field arguments,
     # and determine whether the true branch argument should be on the lower or upper
     # range with respect to the boundary value.
-    mask_domain = gtir_domain.extract_domain(node.args[0])
+    mask_domain = gtir_domain.extract_domain(domain_utils.SymbolicDomain.from_expr(node.args[0]))
     if len(mask_domain) != 1:
         raise NotImplementedError("Expected `concat_where` along single axis.")
 

@@ -14,7 +14,6 @@ from typing import Final
 import dace
 
 from gt4py.eve import codegen
-from gt4py.next import common as gtx_common
 from gt4py.next.iterator import builtins as itir_builtins
 from gt4py.next.otf import languages, stages
 from gt4py.next.program_processors.runners.dace import utils as gtx_dace_utils
@@ -72,6 +71,7 @@ def _parse_gt_param(
     code: codegen.TextBlock,
     sdfg_arglist: dict[str, dace.data.Data],
     make_persistent: bool,
+    tuple_name: str | None = None,
 ) -> None:
     """Emit Python code to parse a program argument and set the required fields in the SDFG arglist.
 
@@ -84,40 +84,21 @@ def _parse_gt_param(
     For tuple arguments, this function is recursively called on all elements of the tuple.
     """
     if isinstance(param_type, ts.TupleType):
-        # Special handling of tuples
-        if (m := FIELD_RANGE_PARAM_RE.match(param_name)) is not None:
-            # Domain range is expressed as a tuple in each dimension
-            gt_field_name, dim_value = m[1], m[2]
-            dim = gtx_common.Dimension(dim_value)
-            rstart = gtx_dace_utils.range_start_symbol(gt_field_name, dim)
-            rstop = gtx_dace_utils.range_stop_symbol(gt_field_name, dim)
-            for i, tuple_param_name in enumerate([rstart, rstop]):
-                tuple_arg = f"{arg}[{i}]"
-                tuple_param_type = param_type.types[i]
-                assert isinstance(tuple_param_type, ts.ScalarType)
-                _parse_gt_param(
-                    tuple_param_name,
-                    tuple_param_type,
-                    tuple_arg,
-                    code,
-                    sdfg_arglist,
-                    make_persistent,
-                )
-        else:
-            # For regular data tuples, each element of the tuple gets a name
-            # with an index-based suffix and it is recursively visited.
-            for i, tuple_param_type in enumerate(param_type.types):
-                tuple_arg = f"{arg}[{i}]"
-                tuple_param_name = f"{param_name}_{i}"
-                assert isinstance(tuple_param_type, ts.DataType)
-                _parse_gt_param(
-                    tuple_param_name,
-                    tuple_param_type,
-                    tuple_arg,
-                    code,
-                    sdfg_arglist,
-                    make_persistent,
-                )
+        # Special handling of tuples: each element of the tuple gets a name
+        # with an index-based suffix and it is recursively visited.
+        for i, tuple_param_type in enumerate(param_type.types):
+            tuple_arg = f"{arg}[{i}]"
+            tuple_param_name = f"{param_name}_{i}"
+            assert isinstance(tuple_param_type, ts.DataType)
+            _parse_gt_param(
+                tuple_param_name,
+                tuple_param_type,
+                tuple_arg,
+                code,
+                sdfg_arglist,
+                make_persistent,
+                tuple_name=(tuple_name or param_name),
+            )
 
     elif param_name not in sdfg_arglist:
         # symbols that are not used are removed from the SDFG arglist
@@ -156,8 +137,8 @@ def _parse_gt_param(
                         # like 'range_stop - range_start', where 'range_start' and
                         # 'range_stop' are SDFG symbols.
                         dim_range = f"{arg}.domain.ranges[{i}]"
-                        rstart = gtx_dace_utils.range_start_symbol(param_name, dim)
-                        rstop = gtx_dace_utils.range_stop_symbol(param_name, dim)
+                        rstart = gtx_dace_utils.range_start_symbol(tuple_name or param_name, dim)
+                        rstop = gtx_dace_utils.range_stop_symbol(tuple_name or param_name, dim)
                         for suffix, symbol_name in [("start", rstart), ("stop", rstop)]:
                             value = f"{dim_range}.{suffix}"
                             _parse_gt_param(

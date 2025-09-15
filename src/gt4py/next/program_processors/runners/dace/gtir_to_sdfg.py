@@ -37,7 +37,7 @@ from gt4py import eve
 from gt4py.eve import concepts
 from gt4py.next import common as gtx_common, utils as gtx_utils
 from gt4py.next.iterator import ir as gtir
-from gt4py.next.iterator.ir_utils import common_pattern_matcher as cpm
+from gt4py.next.iterator.ir_utils import common_pattern_matcher as cpm, domain_utils
 from gt4py.next.iterator.transforms import prune_casts as ir_prune_casts, symbol_ref_utils
 from gt4py.next.iterator.type_system import inference as gtir_type_inference
 from gt4py.next.program_processors.runners.dace import (
@@ -135,7 +135,7 @@ class SubgraphContext:
 
     sdfg: dace.SDFG
     state: dace.SDFGState
-    target_domain: gtir_domain.FieldopDomain
+    target_domain: domain_utils.SymbolicDomain
 
 
 class SDFGBuilder(DataflowBuilder, Protocol):
@@ -144,6 +144,7 @@ class SDFGBuilder(DataflowBuilder, Protocol):
     @abc.abstractmethod
     def make_field(
         self,
+        name: str,
         data_node: dace.nodes.AccessNode,
         data_type: ts.FieldType,
     ) -> gtir_to_sdfg_types.FieldopData:
@@ -247,6 +248,7 @@ class GTIRToSDFG(eve.NodeVisitor, SDFGBuilder):
 
     def make_field(
         self,
+        name: str,
         data_node: dace.nodes.AccessNode,
         data_type: ts.FieldType,
     ) -> gtir_to_sdfg_types.FieldopData:
@@ -264,6 +266,7 @@ class GTIRToSDFG(eve.NodeVisitor, SDFGBuilder):
             close to the `FieldopData` type declaration.
 
         Args:
+            name:
             data_node: The access node to the SDFG data storage.
             data_type: The GT4Py data descriptor, which can either come from a field parameter
                 of an expression node, or from an intermediate field in a previous expression.
@@ -293,7 +296,7 @@ class GTIRToSDFG(eve.NodeVisitor, SDFGBuilder):
                 "Fields with more than one local dimension are not supported."
             )
         field_origin = tuple(
-            dace.symbolic.pystr_to_symbolic(gtx_dace_utils.range_start_symbol(data_node.data, dim))
+            dace.symbolic.pystr_to_symbolic(gtx_dace_utils.range_start_symbol(name, dim))
             for dim in field_type.dims
         )
         return gtir_to_sdfg_types.FieldopData(data_node, field_type, field_origin)
@@ -382,7 +385,7 @@ class GTIRToSDFG(eve.NodeVisitor, SDFGBuilder):
         return f"{self.tasklet_uids.sequential_id()}_{name}"
 
     def _make_array_shape_and_strides(
-        self, name: str, dims: Sequence[gtx_common.Dimension]
+        self, name: str, dims: Sequence[gtx_common.Dimension], tuple_name: str | None
     ) -> tuple[list[dace.symbolic.SymbolicType], list[dace.symbolic.SymbolicType]]:
         """
         Parse field dimensions and allocate symbols for array shape and strides.
@@ -412,11 +415,12 @@ class GTIRToSDFG(eve.NodeVisitor, SDFGBuilder):
             else:
                 # the size of global dimensions for a regular field is the symbolic
                 # expression of domain range 'stop - start'
+                arg_name = tuple_name or name
                 shape.append(
                     dace.symbolic.pystr_to_symbolic(
                         "{} - {}".format(
-                            gtx_dace_utils.range_stop_symbol(name, dim),
-                            gtx_dace_utils.range_start_symbol(name, dim),
+                            gtx_dace_utils.range_stop_symbol(arg_name, dim),
+                            gtx_dace_utils.range_start_symbol(arg_name, dim),
                         )
                     )
                 )
@@ -433,6 +437,7 @@ class GTIRToSDFG(eve.NodeVisitor, SDFGBuilder):
         name: str,
         gt_type: ts.DataType,
         transient: bool = True,
+        tuple_name: str | None = None,
     ) -> list[tuple[str, ts.DataType]]:
         """
         Add storage in the SDFG for a given GT4Py data symbol.
@@ -454,6 +459,7 @@ class GTIRToSDFG(eve.NodeVisitor, SDFGBuilder):
             name: Symbol Name to be allocated.
             gt_type: GT4Py symbol type.
             transient: True when the data symbol has to be allocated as internal storage.
+            tuple_name:
 
         Returns:
             List of tuples '(data_name, gt_type)' where 'data_name' is the name of
@@ -473,6 +479,7 @@ class GTIRToSDFG(eve.NodeVisitor, SDFGBuilder):
                         name=str(sym.id),
                         gt_type=sym.type,
                         transient=transient,
+                        tuple_name=(tuple_name or name),
                     )
                 )
             return tuple_fields
@@ -503,7 +510,7 @@ class GTIRToSDFG(eve.NodeVisitor, SDFGBuilder):
                 raise ValueError("Unexpected local dimension in temporary field domain.")
             # Use symbolic shape, which allows to invoke the program with fields of different size;
             # and symbolic strides, which enables decoupling the memory layout from generated code.
-            sym_shape, sym_strides = self._make_array_shape_and_strides(name, dims)
+            sym_shape, sym_strides = self._make_array_shape_and_strides(name, dims, tuple_name)
             sdfg.add_array(name, sym_shape, dc_dtype, strides=sym_strides, transient=transient)
             return [(name, gt_type)]
 
@@ -529,11 +536,11 @@ class GTIRToSDFG(eve.NodeVisitor, SDFGBuilder):
     def _visit_expression(
         self,
         node: gtir.Expr,
-        domain: gtir_domain.FieldopDomain,
+        domain: domain_utils.SymbolicDomain,
         sdfg: dace.SDFG,
         head_state: dace.SDFGState,
         use_temp: bool = True,
-    ) -> list[gtir_to_sdfg_types.FieldopData]:
+    ) -> gtir_to_sdfg_types.FieldopResult:
         """
         Specialized visit method for fieldview expressions.
 
@@ -541,7 +548,7 @@ class GTIRToSDFG(eve.NodeVisitor, SDFGBuilder):
         As such, it must preserve the property of single exit state in the SDFG.
 
         Returns:
-            A list of array nodes containing the result fields.
+            The SDFG array nodes containing the result of the fieldview expression.
         """
 
         ctx = SubgraphContext(sdfg, head_state, domain)
@@ -550,10 +557,10 @@ class GTIRToSDFG(eve.NodeVisitor, SDFGBuilder):
         # sanity check: each statement should preserve the property of single exit state (aka head state),
         # i.e. eventually only introduce internal branches, and keep the same head state
         sink_states = sdfg.sink_nodes()
-        assert len(sink_states) == 1
-        assert sink_states[0] == head_state
+        assert head_state in sink_states
+        assert all(sdfg.degree(state) == 0 for state in sdfg.sink_nodes() if state != head_state)
 
-        def make_temps(
+        def _visit_result(
             src: gtir_to_sdfg_types.FieldopData,
         ) -> gtir_to_sdfg_types.FieldopData:
             src_desc = sdfg.arrays[src.dc_node.data]
@@ -573,8 +580,7 @@ class GTIRToSDFG(eve.NodeVisitor, SDFGBuilder):
                 )
                 return gtir_to_sdfg_types.FieldopData(dst_node, src.gt_type, src.origin)
 
-        temp_result = gtx_utils.tree_map(make_temps)(result)
-        return list(gtx_utils.flatten_nested_tuple((temp_result,)))
+        return gtx_utils.tree_map(_visit_result)(result)
 
     def _add_sdfg_params(
         self,
@@ -657,11 +663,17 @@ class GTIRToSDFG(eve.NodeVisitor, SDFGBuilder):
         sdfg_arg_names = self._add_sdfg_params(sdfg, node.params, symbolic_params=None)
 
         # visit one statement at a time and expand the SDFG from the current head state
+        post_states = []
         for i, stmt in enumerate(node.body):
             # include `debuginfo` only for `ir.Program` and `ir.Stmt` nodes: finer granularity would be too messy
             head_state = sdfg.add_state_after(head_state, f"stmt_{i}")
             head_state._debuginfo = gtir_to_sdfg_utils.debug_info(stmt, default=sdfg.debuginfo)
-            head_state = self.visit(stmt, sdfg=sdfg, state=head_state)
+            post_state = self.visit(stmt, sdfg=sdfg, state=head_state)
+            if post_state is not None:
+                post_states.append(post_state)
+
+        for state in post_states:
+            sdfg.add_edge(head_state, state, dace.InterstateEdge())
 
         # remove unused connectivity tables (by design, arrays are marked as non-transient when they are used)
         for nsdfg in sdfg.all_sdfgs_recursive():
@@ -686,7 +698,7 @@ class GTIRToSDFG(eve.NodeVisitor, SDFGBuilder):
 
     def visit_SetAt(
         self, stmt: gtir.SetAt, sdfg: dace.SDFG, state: dace.SDFGState
-    ) -> dace.SDFGState:
+    ) -> dace.SDFGState | None:
         """Visits a `SetAt` statement expression and writes the local result to some external storage.
 
         Each statement expression results in some sort of dataflow gragh writing to temporary storage.
@@ -697,7 +709,7 @@ class GTIRToSDFG(eve.NodeVisitor, SDFGBuilder):
         """
 
         # visit the domain expression
-        domain = gtir_domain.extract_domain(stmt.domain)
+        domain = domain_utils.SymbolicDomain.from_expr(stmt.domain)
         source_fields = self._visit_expression(stmt.expr, domain, sdfg, state)
 
         # the target expression could be a `SymRef` to an output node or a `make_tuple` expression
@@ -715,20 +727,27 @@ class GTIRToSDFG(eve.NodeVisitor, SDFGBuilder):
             if node.data in expr_input_args and state.degree(node) != 0
         }
 
+        # visit the domain expression
         target_state: Optional[dace.SDFGState] = None
-        for source, target in zip(source_fields, target_fields, strict=True):
+        target_domain = gtir_domain.extract_domain(domain)
+
+        def _visit_target(
+            source: gtir_to_sdfg_types.FieldopData,
+            target: gtir_to_sdfg_types.FieldopData,
+        ) -> None:
+            nonlocal target_state
             target_desc = sdfg.arrays[target.dc_node.data]
             assert not target_desc.transient
 
             assert source.gt_type == target.gt_type
-            source_subset = _make_access_index_for_field(domain, source)
-            target_subset = _make_access_index_for_field(domain, target)
+            source_subset = _make_access_index_for_field(target_domain, source)
+            target_subset = _make_access_index_for_field(target_domain, target)
 
             if target.dc_node.data in state_input_data:
                 # if inout argument, write the result in separate next state
                 # this is needed to avoid undefined behavior for expressions like: X, Y = X + 1, X
                 if not target_state:
-                    target_state = sdfg.add_state_after(state, f"post_{state.label}")
+                    target_state = sdfg.add_state(f"post_{state.label}")
                 # create new access nodes in the target state
                 target_state.add_nedge(
                     target_state.add_access(source.dc_node.data),
@@ -748,7 +767,9 @@ class GTIRToSDFG(eve.NodeVisitor, SDFGBuilder):
                     ),
                 )
 
-        return target_state or state
+        gtx_utils.tree_map(_visit_target)(source_fields, target_fields)
+
+        return target_state
 
     def visit_FunCall(
         self,

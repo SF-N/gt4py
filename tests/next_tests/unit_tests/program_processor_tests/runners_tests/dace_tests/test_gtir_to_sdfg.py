@@ -174,10 +174,6 @@ def test_gtir_broadcast():
 
 
 def test_gtir_cast():
-    domain = im.domain(
-        gtx_common.GridType.CARTESIAN,
-        ranges={IDim: get_domain_range("z", IDim)},
-    )
     IFTYPE_FLOAT32 = ts.FieldType(IFTYPE.dims, dtype=ts.ScalarType(kind=ts.ScalarKind.FLOAT32))
     IFTYPE_BOOL = ts.FieldType(IFTYPE.dims, dtype=ts.ScalarType(kind=ts.ScalarKind.BOOL))
     testee = gtir.Program(
@@ -191,11 +187,14 @@ def test_gtir_cast():
         declarations=[],
         body=[
             gtir.SetAt(
-                expr=im.op_as_fieldop("eq", domain)(
-                    im.cast_as_fieldop("float32", domain)("x"),
+                expr=im.op_as_fieldop("eq")(
+                    im.cast_as_fieldop("float32")("x"),
                     "y",
                 ),
-                domain=domain,
+                domain=im.domain(
+                    gtx_common.GridType.CARTESIAN,
+                    ranges={IDim: get_domain_range("z", IDim)},
+                ),
                 target=gtir.SymRef(id="z"),
             )
         ],
@@ -212,7 +211,6 @@ def test_gtir_cast():
 
 
 def test_gtir_copy_self():
-    domain = im.domain(gtx_common.GridType.CARTESIAN, ranges={IDim: (1, 2)})
     testee = gtir.Program(
         id="gtir_copy_self",
         function_definitions=[],
@@ -223,7 +221,7 @@ def test_gtir_copy_self():
         body=[
             gtir.SetAt(
                 expr=gtir.SymRef(id="x"),
-                domain=domain,
+                domain=im.domain(gtx_common.GridType.CARTESIAN, ranges={IDim: (1, 2)}),
                 target=gtir.SymRef(id="x"),
             )
         ],
@@ -254,7 +252,7 @@ def test_gtir_tuple_swap():
         body=[
             gtir.SetAt(
                 expr=im.make_tuple("y", "x"),
-                domain=domain,
+                domain=im.make_tuple(domain, domain),
                 # TODO(havogt): add a frontend check for this pattern
                 target=im.make_tuple("x", "y"),
             )
@@ -273,10 +271,6 @@ def test_gtir_tuple_swap():
 
 
 def test_gtir_tuple_args():
-    domain = im.domain(
-        gtx_common.GridType.CARTESIAN,
-        ranges={IDim: get_domain_range("y", IDim)},
-    )
     testee = gtir.Program(
         id="gtir_tuple_args",
         function_definitions=[],
@@ -289,14 +283,17 @@ def test_gtir_tuple_args():
         declarations=[],
         body=[
             gtir.SetAt(
-                expr=im.op_as_fieldop("plus", domain)(
+                expr=im.op_as_fieldop("plus")(
                     im.tuple_get(0, "x"),
-                    im.op_as_fieldop("plus", domain)(
+                    im.op_as_fieldop("plus")(
                         im.tuple_get(0, im.tuple_get(1, "x")),
                         im.tuple_get(1, im.tuple_get(1, "x")),
                     ),
                 ),
-                domain=domain,
+                domain=im.domain(
+                    gtx_common.GridType.CARTESIAN,
+                    ranges={IDim: get_domain_range("y", IDim)},
+                ),
                 target=gtir.SymRef(id="y"),
             )
         ],
@@ -327,10 +324,6 @@ def test_gtir_tuple_args():
 
 
 def test_gtir_tuple_expr():
-    domain = im.domain(
-        gtx_common.GridType.CARTESIAN,
-        ranges={IDim: get_domain_range("z", IDim)},
-    )
     testee = gtir.Program(
         id="gtir_tuple_expr",
         function_definitions=[],
@@ -342,9 +335,9 @@ def test_gtir_tuple_expr():
         declarations=[],
         body=[
             gtir.SetAt(
-                expr=im.op_as_fieldop("plus", domain)(
+                expr=im.op_as_fieldop("plus")(
                     im.tuple_get(0, im.make_tuple("x", im.make_tuple("x", "y"))),
-                    im.op_as_fieldop("plus", domain)(
+                    im.op_as_fieldop("plus")(
                         im.tuple_get(
                             0, im.tuple_get(1, im.make_tuple("x", im.make_tuple("x", "y")))
                         ),
@@ -353,7 +346,10 @@ def test_gtir_tuple_expr():
                         ),
                     ),
                 ),
-                domain=domain,
+                domain=im.domain(
+                    gtx_common.GridType.CARTESIAN,
+                    ranges={IDim: get_domain_range("z", IDim)},
+                ),
                 target=gtir.SymRef(id="z"),
             )
         ],
@@ -462,10 +458,6 @@ def test_gtir_zero_dim_fields():
 
 
 def test_gtir_tuple_return():
-    domain = im.domain(
-        gtx_common.GridType.CARTESIAN,
-        ranges={IDim: get_domain_range(im.tuple_get(0, im.tuple_get(0, "z")), IDim)},
-    )
     testee = gtir.Program(
         id="gtir_tuple_return",
         function_definitions=[],
@@ -479,10 +471,11 @@ def test_gtir_tuple_return():
         declarations=[],
         body=[
             gtir.SetAt(
-                expr=im.make_tuple(
-                    im.make_tuple(im.op_as_fieldop("plus", domain)("x", "y"), "x"), "y"
+                expr=im.make_tuple(im.make_tuple(im.op_as_fieldop("plus")("x", "y"), "x"), "y"),
+                domain=im.domain(
+                    gtx_common.GridType.CARTESIAN,
+                    ranges={IDim: get_domain_range("z", IDim)},
                 ),
-                domain=domain,
                 target=gtir.SymRef(id="z"),
             )
         ],
@@ -514,10 +507,6 @@ def test_gtir_tuple_return():
 
 
 def test_gtir_tuple_target():
-    domain = im.domain(
-        gtx_common.GridType.CARTESIAN,
-        ranges={IDim: get_domain_range("x", IDim)},
-    )
     testee = gtir.Program(
         id="gtir_tuple_target",
         function_definitions=[],
@@ -528,8 +517,17 @@ def test_gtir_tuple_target():
         declarations=[],
         body=[
             gtir.SetAt(
-                expr=im.make_tuple(im.op_as_fieldop("plus", domain)("x", 1.0), gtir.SymRef(id="x")),
-                domain=domain,
+                expr=im.make_tuple(im.op_as_fieldop("plus")("x", 1.0), gtir.SymRef(id="x")),
+                domain=im.make_tuple(
+                    im.domain(
+                        gtx_common.GridType.CARTESIAN,
+                        ranges={IDim: get_domain_range("x", IDim)},
+                    ),
+                    im.domain(
+                        gtx_common.GridType.CARTESIAN,
+                        ranges={IDim: get_domain_range("y", IDim)},
+                    ),
+                ),
                 target=im.make_tuple("x", "y"),
             )
         ],
@@ -547,15 +545,10 @@ def test_gtir_tuple_target():
 
 
 def test_gtir_update():
-    domain = im.domain(
-        gtx_common.GridType.CARTESIAN,
-        ranges={IDim: get_domain_range("x", IDim)},
-    )
     stencil1 = im.as_fieldop(
-        im.lambda_("a")(im.plus(im.deref("a"), im.plus(im.minus(0.0, 2.0), 1.0))),
-        domain,
+        im.lambda_("a")(im.plus(im.deref("a"), im.plus(im.minus(0.0, 2.0), 1.0)))
     )("x")
-    stencil2 = im.op_as_fieldop("plus", domain)("x", im.plus(im.minus(0.0, 2.0), 1.0))
+    stencil2 = im.op_as_fieldop("plus")("x", im.plus(im.minus(0.0, 2.0), 1.0))
 
     for i, stencil in enumerate([stencil1, stencil2]):
         testee = gtir.Program(
@@ -568,7 +561,10 @@ def test_gtir_update():
             body=[
                 gtir.SetAt(
                     expr=stencil,
-                    domain=domain,
+                    domain=im.domain(
+                        gtx_common.GridType.CARTESIAN,
+                        ranges={IDim: get_domain_range("x", IDim)},
+                    ),
                     target=gtir.SymRef(id="x"),
                 )
             ],
@@ -583,10 +579,6 @@ def test_gtir_update():
 
 
 def test_gtir_sum2():
-    domain = im.domain(
-        gtx_common.GridType.CARTESIAN,
-        ranges={IDim: get_domain_range("z", IDim)},
-    )
     testee = gtir.Program(
         id="sum_2fields",
         function_definitions=[],
@@ -598,8 +590,11 @@ def test_gtir_sum2():
         declarations=[],
         body=[
             gtir.SetAt(
-                expr=im.op_as_fieldop("plus", domain)("x", "y"),
-                domain=domain,
+                expr=im.op_as_fieldop("plus")("x", "y"),
+                domain=im.domain(
+                    gtx_common.GridType.CARTESIAN,
+                    ranges={IDim: get_domain_range("z", IDim)},
+                ),
                 target=gtir.SymRef(id="z"),
             )
         ],
@@ -616,10 +611,6 @@ def test_gtir_sum2():
 
 
 def test_gtir_sum2_sym():
-    domain = im.domain(
-        gtx_common.GridType.CARTESIAN,
-        ranges={IDim: get_domain_range("z", IDim)},
-    )
     testee = gtir.Program(
         id="sum_2fields_sym",
         function_definitions=[],
@@ -630,8 +621,11 @@ def test_gtir_sum2_sym():
         declarations=[],
         body=[
             gtir.SetAt(
-                expr=im.op_as_fieldop("plus", domain)("x", "x"),
-                domain=domain,
+                expr=im.op_as_fieldop("plus")("x", "x"),
+                domain=im.domain(
+                    gtx_common.GridType.CARTESIAN,
+                    ranges={IDim: get_domain_range("z", IDim)},
+                ),
                 target=gtir.SymRef(id="z"),
             )
         ],
@@ -647,17 +641,12 @@ def test_gtir_sum2_sym():
 
 
 def test_gtir_sum3():
-    domain = im.domain(
-        gtx_common.GridType.CARTESIAN,
-        ranges={IDim: get_domain_range("z", IDim)},
-    )
-    stencil1 = im.op_as_fieldop("plus", domain)(
+    stencil1 = im.op_as_fieldop("plus")(
         "x",
-        im.op_as_fieldop("plus", domain)("y", "w"),
+        im.op_as_fieldop("plus")("y", "w"),
     )
     stencil2 = im.as_fieldop(
-        im.lambda_("a", "b", "c")(im.plus(im.deref("a"), im.plus(im.deref("b"), im.deref("c")))),
-        domain,
+        im.lambda_("a", "b", "c")(im.plus(im.deref("a"), im.plus(im.deref("b"), im.deref("c"))))
     )("x", "y", "w")
 
     a = np.random.rand(N)
@@ -678,7 +667,10 @@ def test_gtir_sum3():
             body=[
                 gtir.SetAt(
                     expr=stencil,
-                    domain=domain,
+                    domain=im.domain(
+                        gtx_common.GridType.CARTESIAN,
+                        ranges={IDim: get_domain_range("z", IDim)},
+                    ),
                     target=gtir.SymRef(id="z"),
                 )
             ],
@@ -692,6 +684,7 @@ def test_gtir_sum3():
         assert np.allclose(d, (a + b + c))
 
 
+##! I AM HERE
 @pytest.mark.parametrize("s1", [1, 2])
 @pytest.mark.parametrize("s2", [1, 2])
 def test_gtir_cond(s1, s2):

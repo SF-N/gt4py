@@ -9,12 +9,12 @@
 from __future__ import annotations
 
 import functools
-from typing import Any, Sequence
+from typing import Any
 
 import dace
 
 from gt4py._core import definitions as core_defs
-from gt4py.next import common as gtx_common, config, metrics, utils as gtx_utils
+from gt4py.next import common as gtx_common, config, metrics
 from gt4py.next.otf import stages
 from gt4py.next.program_processors.runners.dace import sdfg_callable, workflow as dace_worflow
 from gt4py.next.program_processors.runners.dace.workflow import common as gtx_wfdcommon
@@ -41,11 +41,10 @@ def convert_args(
             # First call, the SDFG is not intitalized, so forward the call to `CompiledSDFG`
             # to proper initilize it. Later calls to this SDFG will be handled through
             # the `fast_call()` API.
-            flat_args: Sequence[Any] = gtx_utils.flatten_nested_tuple(tuple(args))
             this_call_args = sdfg_callable.get_sdfg_args(
                 fun.sdfg_program.sdfg,
                 offset_provider,
-                *flat_args,
+                *args,
                 filter_args=False,
             )
             with dace.config.set_temporary("compiler", "allow_view_arguments", value=True):
