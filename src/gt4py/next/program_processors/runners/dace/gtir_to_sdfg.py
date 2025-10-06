@@ -53,9 +53,6 @@ from gt4py.next.program_processors.runners.dace import (
 from gt4py.next.type_system import type_specifications as ts, type_translation as tt
 
 
-_P = ParamSpec("_P")
-_R = TypeVar("_R")
-
 class DataflowBuilder(Protocol):
     """Visitor interface to build a dataflow subgraph."""
 
