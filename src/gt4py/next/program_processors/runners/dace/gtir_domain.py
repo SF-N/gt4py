@@ -15,8 +15,10 @@ import dace
 import sympy
 from dace import subsets as dace_subsets
 
+from gt4py import eve
 from gt4py.next import common as gtx_common
-from gt4py.next.iterator.ir_utils import domain_utils
+from gt4py.next.iterator import ir as gtir
+from gt4py.next.iterator.ir_utils import common_pattern_matcher as cpm, domain_utils
 from gt4py.next.program_processors.runners.dace import gtir_to_sdfg_utils
 
 
@@ -40,6 +42,9 @@ FieldopDomain: TypeAlias = list[FieldopDomainRange]
 """Domain of a field operator represented as a list of `FieldopDomainRange` for each dimension."""
 
 
+TargetDomain: TypeAlias = domain_utils.SymbolicDomain | tuple[domain_utils.SymbolicDomain, ...]
+
+
 def extract_domain(node: domain_utils.SymbolicDomain) -> FieldopDomain:
     """
     Visits the domain of a field operator and returns a list of dimensions and
@@ -56,6 +61,16 @@ def extract_domain(node: domain_utils.SymbolicDomain) -> FieldopDomain:
         for dim, drange in node.ranges.items()
     ]
 
+
+class DomainParser(eve.visitors.NodeTranslator):
+    def visit_FunCall(self, node: gtir.FunCall) -> TargetDomain:
+        if cpm.is_call_to(node, "make_tuple"):
+            return tuple(self.visit(arg) for arg in node.args)
+        else:
+            return domain_utils.SymbolicDomain.from_expr(node)
+    
+    def apply(node: gtir.FunCall) -> TargetDomain:
+        return DomainParser().visit(node)
 
 def simplify_domain_expr(
     expr: sympy.Basic, domain: domain_utils.SymbolicDomain

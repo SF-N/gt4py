@@ -236,10 +236,10 @@ def _create_field_operator(
         # handle tuples of fields
         output_symbol_tree = gtir_to_sdfg_utils.make_symbol_tree("x", node_type)
         return gtx_utils.tree_map(
-            lambda output_edge, output_sym: _create_field_operator_impl(
-                ctx, sdfg_builder, domain, output_edge, output_sym.type, map_exit
+            lambda _ctx, _edge, _sym: _create_field_operator_impl(
+                _ctx, sdfg_builder, domain, _edge, _sym.type, map_exit
             )
-        )(output_tree, output_symbol_tree)
+        )(ctx.expand_tuple_domain(), output_tree, output_symbol_tree)
 
 
 def translate_as_fieldop(
@@ -454,12 +454,13 @@ def translate_if(
             # TODO(edopao): this is a workaround for some IR nodes where the inferred
             #   domain on a tuple of fields is not a tuple, see `test_execution.py::test_ternary_operator_tuple()`
             domain_tree = gtx_utils.tree_map(lambda _: node.annex.domain)(symbol_tree)
+            assert False  # checking if still needed
         node_output = gtx_utils.tree_map(
-            lambda sym,
+            lambda _ctx,
+            sym,
             domain,
             true_br,
             false_br,
-            _ctx=ctx,
             sdfg_builder=sdfg_builder: _construct_if_branch_output(
                 _ctx,
                 sdfg_builder,
@@ -469,17 +470,18 @@ def translate_if(
                 false_br,
             )
         )(
+            ctx.expand_tuple_domain(),
             symbol_tree,
             domain_tree,
             true_br_result,
             false_br_result,
         )
         gtx_utils.tree_map(
-            lambda src, dst, _ctx=tbranch_ctx: _write_if_branch_output(_ctx, src, dst)
-        )(true_br_result, node_output)
+            lambda _ctx, src, dst: _write_if_branch_output(_ctx, src, dst)
+        )(tbranch_ctx.expand_tuple_domain(), true_br_result, node_output)
         gtx_utils.tree_map(
-            lambda src, dst, _ctx=fbranch_ctx: _write_if_branch_output(_ctx, src, dst)
-        )(false_br_result, node_output)
+            lambda _ctx, src, dst: _write_if_branch_output(_ctx, src, dst)
+        )(fbranch_ctx.expand_tuple_domain(), false_br_result, node_output)
     else:
         node_output = _construct_if_branch_output(
             ctx,
@@ -545,13 +547,12 @@ def _get_data_nodes(
     sdfg: dace.SDFG,
     state: dace.SDFGState,
     sdfg_builder: gtir_to_sdfg.SDFGBuilder,
-    arg_name: str,
     data_name: str,
     data_type: ts.DataType,
 ) -> gtir_to_sdfg_types.FieldopResult:
     if isinstance(data_type, ts.FieldType):
         data_node = state.add_access(data_name)
-        return sdfg_builder.make_field(arg_name, data_node, data_type)
+        return sdfg_builder.make_field(data_node, data_type)
 
     elif isinstance(data_type, ts.ScalarType):
         if data_name in sdfg.symbols:
@@ -565,7 +566,7 @@ def _get_data_nodes(
     elif isinstance(data_type, ts.TupleType):
         symbol_tree = gtir_to_sdfg_utils.make_symbol_tree(data_name, data_type)
         return gtx_utils.tree_map(
-            lambda sym: _get_data_nodes(sdfg, state, sdfg_builder, arg_name, sym.id, sym.type)
+            lambda sym: _get_data_nodes(sdfg, state, sdfg_builder, sym.id, sym.type)
         )(symbol_tree)
 
     else:
@@ -624,7 +625,8 @@ def translate_make_tuple(
     sdfg_builder: gtir_to_sdfg.SDFGBuilder,
 ) -> gtir_to_sdfg_types.FieldopResult:
     assert cpm.is_call_to(node, "make_tuple")
-    return tuple(sdfg_builder.visit(arg, ctx=ctx) for arg in node.args)
+
+    return tuple(sdfg_builder.visit(arg, ctx=ctx.get_tuple_domain(i)) for i, arg in enumerate(node.args))
 
 
 def translate_tuple_get(
@@ -740,9 +742,7 @@ def translate_symbol_ref(
     # Create new access node in current state. It is possible that multiple
     # access nodes are created in one state for the same data container.
     # We rely on the dace simplify pass to remove duplicated access nodes.
-    return _get_data_nodes(
-        ctx.sdfg, ctx.state, sdfg_builder, symbol_name, symbol_name, gt_symbol_type
-    )
+    return _get_data_nodes(ctx.sdfg, ctx.state, sdfg_builder, symbol_name, gt_symbol_type)
 
 
 if TYPE_CHECKING:

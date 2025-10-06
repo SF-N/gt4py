@@ -486,13 +486,13 @@ def translate_concat_where(
         )
         if isinstance(node.type, ts.FieldType)
         else gtx_utils.tree_map(
-            lambda _node_domain,
+            lambda _ctx,
+            _node_domain,
             _tb_node_domain,
             _fb_node_domain,
             _tb_field,
             _fb_field,
             _sdfg_builder=sdfg_builder,
-            _ctx=ctx,
             _mask_domain=mask_domain: _translate_concat_where_impl(
                 _ctx,
                 _sdfg_builder,
@@ -503,5 +503,5 @@ def translate_concat_where(
                 _tb_field,
                 _fb_field,
             )
-        )(node.annex.domain, node.args[1].annex.domain, node.args[2].annex.domain, tb, fb)
+        )(ctx.expand_tuple_domain(), node.annex.domain, node.args[1].annex.domain, node.args[2].annex.domain, tb, fb)
     )

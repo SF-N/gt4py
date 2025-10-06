@@ -71,7 +71,6 @@ def _parse_gt_param(
     code: codegen.TextBlock,
     sdfg_arglist: dict[str, dace.data.Data],
     make_persistent: bool,
-    tuple_name: str | None = None,
 ) -> None:
     """Emit Python code to parse a program argument and set the required fields in the SDFG arglist.
 
@@ -97,7 +96,6 @@ def _parse_gt_param(
                 code,
                 sdfg_arglist,
                 make_persistent,
-                tuple_name=(tuple_name or param_name),
             )
 
     elif param_name not in sdfg_arglist:
@@ -137,8 +135,8 @@ def _parse_gt_param(
                         # like 'range_stop - range_start', where 'range_start' and
                         # 'range_stop' are SDFG symbols.
                         dim_range = f"{arg}.domain.ranges[{i}]"
-                        rstart = gtx_dace_utils.range_start_symbol(tuple_name or param_name, dim)
-                        rstop = gtx_dace_utils.range_stop_symbol(tuple_name or param_name, dim)
+                        rstart = gtx_dace_utils.range_start_symbol(param_name, dim)
+                        rstop = gtx_dace_utils.range_stop_symbol(param_name, dim)
                         for suffix, symbol_name in [("start", rstart), ("stop", rstop)]:
                             value = f"{dim_range}.{suffix}"
                             _parse_gt_param(

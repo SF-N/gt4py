@@ -256,17 +256,17 @@ def _create_scan_field_operator(
         # the tree structure of the `TupleType` definition to pass to `tree_map()`
         output_symbol_tree = gtir_to_sdfg_utils.make_symbol_tree("x", node_type)
         return gtx_utils.tree_map(
-            lambda output_edge, output_sym: (
+            lambda _ctx, _edge, _sym: (
                 _create_scan_field_operator_impl(
-                    ctx,
+                    _ctx,
                     sdfg_builder,
                     domain,
-                    output_edge,
-                    output_sym.type,
+                    _edge,
+                    _sym.type,
                     map_exit,
                 )
             )
-        )(output_tree, output_symbol_tree)
+        )(ctx.expand_tuple_domain(), output_tree, output_symbol_tree)
 
 
 def _scan_input_name(input_name: str) -> str:
@@ -690,10 +690,10 @@ def translate_scan(
     # for output connections, we create temporary arrays that contain the computation
     # results of a column slice for each point in the horizontal domain
     lambda_output_tree = gtx_utils.tree_map(
-        lambda lambda_output_data: _connect_nested_sdfg_output_to_temporaries(
-            lambda_ctx, ctx, nsdfg_node, lambda_output_data
+        lambda _lambda_ctx, _ctx, lambda_output_data: _connect_nested_sdfg_output_to_temporaries(
+            _lambda_ctx, _ctx, nsdfg_node, lambda_output_data
         )
-    )(lambda_output)
+    )(lambda_ctx.expand_tuple_domain(), ctx.expand_tuple_domain(), lambda_output)
 
     # we call a helper method to create a map scope that will compute the entire field
     return _create_scan_field_operator(
