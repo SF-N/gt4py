@@ -7,6 +7,8 @@
 # SPDX-License-Identifier: BSD-3-Clause
 
 import copy
+
+import numpy as np
 import pytest
 
 import gt4py.next as gtx
@@ -23,7 +25,6 @@ from next_tests.integration_tests.cases import (
     CField,
     VField,
     Cell,
-    Vertex,
     cartesian_case,
     unstructured_case,
     Case,
@@ -36,23 +37,20 @@ from next_tests.integration_tests.feature_tests.ffront_tests.ffront_test_utils i
     mesh_descriptor,
 )
 
-from gt4py.next import common
-
 KHalfDim = gtx.Dimension("KHalf", kind=gtx.DimensionKind.VERTICAL)
 pytestmark = pytest.mark.uses_cartesian_shift
 
 
 @gtx.field_operator
-def testee_no_tuple(a: IField, b: IField) -> IField:
+def testee_no_tuple(a: IField, b: JField) -> IField:
     return a
 
 
 @gtx.program
 def prog_no_tuple(
     a: IField,
-    b: IField,
+    b: JField,
     out_a: IField,
-    out_b: IField,
     i_size: gtx.int32,
 ):
     testee_no_tuple(a, b, out=out_a, domain={IDim: (0, i_size)})
@@ -62,7 +60,6 @@ def test_program_no_tuple(cartesian_case):
     a = cases.allocate(cartesian_case, prog_no_tuple, "a")()
     b = cases.allocate(cartesian_case, prog_no_tuple, "b")()
     out_a = cases.allocate(cartesian_case, prog_no_tuple, "out_a")()
-    out_b = cases.allocate(cartesian_case, prog_no_tuple, "out_b")()
 
     cases.verify(
         cartesian_case,
@@ -70,7 +67,6 @@ def test_program_no_tuple(cartesian_case):
         a,
         b,
         out_a,
-        out_b,
         cartesian_case.default_sizes[IDim],
         inout=out_a,
         ref=a,
@@ -204,6 +200,42 @@ def test_program(cartesian_case):
         cartesian_case.default_sizes[JDim],
         inout=(out_b, out_a),
         ref=(b, a),
+    )
+
+
+@gtx.program
+def prog_slicing(
+    a: IField,
+    b: JField,
+    out_a: IField,
+    out_b: JField,
+):
+    testee(
+        a,
+        b,
+        out=(out_b[2:-2], out_a[1:-1]),
+    )
+
+
+def test_program_slicing(cartesian_case):
+    a = cases.allocate(cartesian_case, prog, "a")()
+    b = cases.allocate(cartesian_case, prog, "b")()
+    out_a = cases.allocate(cartesian_case, prog, "out_a")()
+    out_b = cases.allocate(cartesian_case, prog, "out_b")()
+    out_a_ = copy.deepcopy(out_a)
+    out_b_ = copy.deepcopy(out_b)
+    cases.verify(
+        cartesian_case,
+        prog_slicing,
+        a,
+        b,
+        out_a,
+        out_b,
+        inout=(out_b, out_a),
+        ref=(
+            np.concatenate([out_b_.ndarray[0:2], b.ndarray[2:-2], out_b_.ndarray[-2:]]),
+            np.concatenate([out_a_.ndarray[0:1], a.ndarray[1:-1], out_a_.ndarray[-1:]]),
+        ),
     )
 
 
@@ -587,25 +619,35 @@ def test_direct_fo_orig(cartesian_case):
     )
 
 
-# TODO:
-#  - vertical staggering with dependency
-#  - cleanup and refactor tests
+def test_direct_fo(cartesian_case):
+    a = cases.allocate(cartesian_case, testee, "a")()
+    b = cases.allocate(cartesian_case, testee, "b")()
+    out = cases.allocate(cartesian_case, testee, cases.RETURN)()
 
-#
-# def test_direct_fo(cartesian_case):
-#     a = cases.allocate(cartesian_case, testee, "a")()
-#     b = cases.allocate(cartesian_case, testee, "b")()
-#     out = cases.allocate(cartesian_case, testee, cases.RETURN)()
-#
-#     cases.verify(
-#         cartesian_case,
-#         testee,
-#         a,
-#         b,
-#         out=out,
-#         ref=(b, a),
-#         domain=(
-#             {JDim: (0, cartesian_case.default_sizes[JDim])},
-#             {IDim: (0, cartesian_case.default_sizes[IDim])},
-#         ),
-#     )
+    cases.verify(
+        cartesian_case,
+        testee,
+        a,
+        b,
+        out=out,
+        ref=(b, a),
+        domain=(
+            {JDim: (0, cartesian_case.default_sizes[JDim])},
+            {IDim: (0, cartesian_case.default_sizes[IDim])},
+        ),
+    )
+
+
+def test_direct_fo_no_domain(cartesian_case):
+    a = cases.allocate(cartesian_case, testee, "a")()
+    b = cases.allocate(cartesian_case, testee, "b")()
+    out = cases.allocate(cartesian_case, testee, cases.RETURN)()
+
+    cases.verify(
+        cartesian_case,
+        testee,
+        a,
+        b,
+        out=out,
+        ref=(b, a),
+    )

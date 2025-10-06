@@ -33,7 +33,6 @@ from gt4py.next import (
     embedded as next_embedded,
     errors,
     metrics,
-    utils,
 )
 from gt4py.next.embedded import operators as embedded_operators
 from gt4py.next.ffront import (
@@ -273,13 +272,17 @@ class Program:
         if self.static_params is None:
             object.__setattr__(self, "static_params", ())
 
+        argument_descriptor_mapping = {
+            arguments.StaticArg: self.static_params,
+        }
+
         program_type = self.past_stage.past_node.type
         assert isinstance(program_type, ts_ffront.ProgramType)
         return compiled_program.CompiledProgramsPool(
             backend=self.backend,
             definition_stage=self.definition_stage,
             program_type=program_type,
-            static_params=self.static_params,
+            argument_descriptor_mapping=argument_descriptor_mapping,  # type: ignore[arg-type]  # covariant `type[T]` not possible
         )
 
     def _extend_offset_provider(
@@ -625,16 +628,18 @@ def program(
 
 OperatorNodeT = TypeVar("OperatorNodeT", bound=foast.LocatedNode)
 
-# def _slice_outs(
-#     outs: common.Field | tuple[common.Field | tuple, ...],
-#     domains: common.Domain | tuple[common.Domain | tuple, ...],
-# ) -> common.Field | tuple[common.Field | tuple, ...]:
-#     if isinstance(outs, tuple):
-#         if not isinstance(domains, tuple):
-#             domains = tuple([domains] * len(outs))
-#         return tuple(_slice_outs(out, domain) for out, domain in zip(outs, domains, strict=True))
-#     else:
-#         return outs[common.domain(domains)]
+
+def _slice_outs(
+    outs: xtyping.MaybeNestedInTuple[common.Field],
+    domains: xtyping.MaybeNestedInTuple[common.Domain],
+) -> common.Field | tuple[common.Field | tuple, ...]:
+    if isinstance(outs, tuple):
+        if not isinstance(domains, tuple):
+            domains = tuple([domains] * len(outs))
+        return tuple(_slice_outs(out, domain) for out, domain in zip(outs, domains, strict=True))
+    else:
+        return outs[domains]
+
 
 
 @dataclasses.dataclass(frozen=True)
@@ -778,9 +783,8 @@ class FieldOperator(GTCallable, Generic[OperatorNodeT]):
                 raise errors.MissingArgumentError(None, "out", True)
             out = kwargs.pop("out")
             if "domain" in kwargs:
-                # out = _slice_outs(out, kwargs.pop("domain"))
-                domain = common.domain(kwargs.pop("domain"))
-                out = utils.tree_map(lambda f: f[domain])(out)
+                dom = common.normalize_domains(kwargs.pop("domain"))
+                out = _slice_outs(out, dom)
 
             args, kwargs = type_info.canonicalize_arguments(
                 self.foast_stage.foast_node.type, args, kwargs
