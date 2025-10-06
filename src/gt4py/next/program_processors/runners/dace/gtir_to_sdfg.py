@@ -151,14 +151,6 @@ class SubgraphContext:
             raise ValueError("Expected a tuple of domains.")
         return gtx_utils.tree_map(lambda domain, _sdfg=self.sdfg, _state=self.state: SubgraphContext(_sdfg, _state, domain))(self.target_domain)
 
-    def tree_map(
-        fun: Optional[Callable[_P, _R]] = None,
-        *,
-        collection_type: type | tuple[type, ...] = tuple,
-        result_collection_constructor: Optional[type | Callable] = None,
-) -> Callable[..., _R | tuple[_R | tuple, ...]] | Callable[[Callable[_P, _R]], Callable[..., Any]]:
-        
-
 
 class SDFGBuilder(DataflowBuilder, Protocol):
     """Visitor interface available to GTIR-primitive translators."""
