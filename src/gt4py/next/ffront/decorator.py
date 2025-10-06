@@ -641,7 +641,6 @@ def _slice_outs(
         return outs[domains]
 
 
-
 @dataclasses.dataclass(frozen=True)
 class FieldOperator(GTCallable, Generic[OperatorNodeT]):
     """
