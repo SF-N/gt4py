@@ -9,14 +9,14 @@
 from __future__ import annotations
 
 import dataclasses
-from typing import Optional, Sequence, TypeAlias
+from typing import Any, Optional, Sequence, TypeAlias
 
 import dace
 import sympy
 from dace import subsets as dace_subsets
 
 from gt4py import eve
-from gt4py.next import common as gtx_common
+from gt4py.next import common as gtx_common, utils as gtx_utils
 from gt4py.next.iterator import ir as gtir
 from gt4py.next.iterator.ir_utils import common_pattern_matcher as cpm, domain_utils
 from gt4py.next.program_processors.runners.dace import gtir_to_sdfg_utils
@@ -42,7 +42,9 @@ FieldopDomain: TypeAlias = list[FieldopDomainRange]
 """Domain of a field operator represented as a list of `FieldopDomainRange` for each dimension."""
 
 
-TargetDomain: TypeAlias = domain_utils.SymbolicDomain | tuple[domain_utils.SymbolicDomain, ...]
+TargetDomain: TypeAlias = (
+    domain_utils.SymbolicDomain | tuple[domain_utils.SymbolicDomain | tuple[Any, ...], ...]
+)
 
 
 def extract_domain(node: domain_utils.SymbolicDomain) -> FieldopDomain:
@@ -68,13 +70,12 @@ class DomainParser(eve.visitors.NodeTranslator):
             return tuple(self.visit(arg) for arg in node.args)
         else:
             return domain_utils.SymbolicDomain.from_expr(node)
-    
-    def apply(node: gtir.FunCall) -> TargetDomain:
-        return DomainParser().visit(node)
 
-def simplify_domain_expr(
-    expr: sympy.Basic, domain: domain_utils.SymbolicDomain
-) -> dace.symbolic.SymbolicType:
+    def apply(cls, node: gtir.Expr) -> TargetDomain:
+        return cls.visit(node)
+
+
+def simplify_domain_expr(expr: sympy.Basic, domain: TargetDomain) -> dace.symbolic.SymbolicType:
     """Simplifies a symbolic expression by applying constraints from domain range.
 
     Dace uses sympy for symbolic expressions in the SDFG. By applying assumptions
@@ -87,13 +88,14 @@ def simplify_domain_expr(
     Returns:
         A new symbolic expression.
     """
-    for dim_range in extract_domain(domain):
-        # We want to enforce the constraint `ub = lb + size`. The actual constraint
-        # is given by the assumption that the `size` variable is integer and non-negative.
-        size = sympy.var(f"__gtir_{dim_range.dim.value}_size", integer=True, negative=False)
-        expr = expr.subs(dim_range.start, dim_range.stop - size).subs(
-            size, dim_range.stop - dim_range.start
-        )
+    for _domain in gtx_utils.flatten_nested_tuple((domain,)):
+        for dim_range in extract_domain(_domain):
+            # We want to enforce the constraint `ub = lb + size`. The actual constraint
+            # is given by the assumption that the `size` variable is integer and non-negative.
+            size = sympy.var(f"__gtir_{dim_range.dim.value}_size", integer=True, negative=False)
+            expr = expr.subs(dim_range.start, dim_range.stop - size).subs(
+                size, dim_range.stop - dim_range.start
+            )
     return dace.symbolic.simplify_ext(expr)
 
 

@@ -87,6 +87,7 @@ def _make_concat_scalar_broadcast(
     """
     assert isinstance(inp.gt_type, ts.FieldType)
     assert len(inp.gt_type.dims) == 1
+    assert isinstance(ctx.target_domain, domain_utils.SymbolicDomain)
     out_dims, out_origin, out_shape = gtir_domain.get_field_layout(out_domain, ctx.target_domain)
     out_type = ts.FieldType(dims=out_dims, dtype=inp.gt_type.dtype)
 
@@ -181,6 +182,7 @@ def _translate_concat_where_impl(
 
     # we use the concat domain, stored in the annex, as the domain of output field
     output_domain = gtir_domain.extract_domain(node_domain)
+    assert isinstance(ctx.target_domain, domain_utils.SymbolicDomain)
     output_dims, output_origin, output_shape = gtir_domain.get_field_layout(
         output_domain, ctx.target_domain
     )
@@ -462,6 +464,11 @@ def translate_concat_where(
     assert cpm.is_call_to(node, "concat_where")
     assert len(node.args) == 3
 
+    if not isinstance(ctx.target_domain, domain_utils.SymbolicDomain):
+        raise NotImplementedError(
+            f"Expected concat_where on a field domain, found target '{ctx.target_domain}'."
+        )
+
     # First argument is a domain expression that defines the mask of the true branch:
     # we extract the dimension along which we need to concatenate the field arguments,
     # and determine whether the true branch argument should be on the lower or upper
@@ -486,13 +493,13 @@ def translate_concat_where(
         )
         if isinstance(node.type, ts.FieldType)
         else gtx_utils.tree_map(
-            lambda _ctx,
-            _node_domain,
+            lambda _node_domain,
             _tb_node_domain,
             _fb_node_domain,
             _tb_field,
             _fb_field,
             _sdfg_builder=sdfg_builder,
+            _ctx=ctx,
             _mask_domain=mask_domain: _translate_concat_where_impl(
                 _ctx,
                 _sdfg_builder,
@@ -503,5 +510,5 @@ def translate_concat_where(
                 _tb_field,
                 _fb_field,
             )
-        )(ctx.expand_tuple_domain(), node.annex.domain, node.args[1].annex.domain, node.args[2].annex.domain, tb, fb)
+        )(node.annex.domain, node.args[1].annex.domain, node.args[2].annex.domain, tb, fb)
     )

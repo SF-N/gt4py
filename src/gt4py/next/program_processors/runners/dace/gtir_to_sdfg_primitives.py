@@ -81,11 +81,10 @@ def _parse_fieldop_arg(
 
     arg = sdfg_builder.visit(node, ctx=ctx)
 
-    if isinstance(arg, gtir_to_sdfg_types.FieldopData):
-        return arg.get_local_view(domain, ctx.sdfg)
-    else:
-        # handle tuples of fields
-        return gtx_utils.tree_map(lambda targ: targ.get_local_view(domain))(arg)
+    if not isinstance(arg, gtir_to_sdfg_types.FieldopData):
+        assert isinstance(arg, tuple)
+        raise ValueError("Expected a field, found a tuple of fields.")
+    return arg.get_local_view(domain, ctx.sdfg)
 
 
 def _create_field_operator_impl(
@@ -117,6 +116,7 @@ def _create_field_operator_impl(
     dataflow_output_desc = output_edge.result.dc_node.desc(ctx.sdfg)
 
     # the memory layout of the output field follows the field operator compute domain
+    assert isinstance(ctx.target_domain, domain_utils.SymbolicDomain)
     field_dims, field_origin, field_shape = gtir_domain.get_field_layout(
         field_domain, ctx.target_domain
     )
@@ -236,10 +236,10 @@ def _create_field_operator(
         # handle tuples of fields
         output_symbol_tree = gtir_to_sdfg_utils.make_symbol_tree("x", node_type)
         return gtx_utils.tree_map(
-            lambda _ctx, _edge, _sym: _create_field_operator_impl(
+            lambda _edge, _sym, _ctx=ctx: _create_field_operator_impl(
                 _ctx, sdfg_builder, domain, _edge, _sym.type, map_exit
             )
-        )(ctx.expand_tuple_domain(), output_tree, output_symbol_tree)
+        )(output_tree, output_symbol_tree)
 
 
 def translate_as_fieldop(
@@ -288,7 +288,20 @@ def translate_as_fieldop(
         )
 
     # parse the domain of the field operator
-    domain = gtir_domain.extract_domain(node.annex.domain)
+    if isinstance(node.annex.domain, domain_utils.SymbolicDomain):
+        domain = gtir_domain.extract_domain(node.annex.domain)
+    else:
+        # a field operator returning a tuple of fields should have the same domain on all fields
+        node_annex_domain: domain_utils.SymbolicDomain | None = None
+        for _domain in gtx_utils.flatten_nested_tuple(node.annex.domain):
+            if node_annex_domain is None:
+                node_annex_domain = _domain
+            elif _domain != node_annex_domain:
+                raise ValueError(
+                    "Field operator is expected to have the same domain for all tuple fields."
+                )
+        assert node_annex_domain is not None
+        domain = gtir_domain.extract_domain(node_annex_domain)
 
     # visit the list of arguments to be passed to the lambda expression
     fieldop_args = [_parse_fieldop_arg(arg, ctx, sdfg_builder, domain) for arg in node.args]
@@ -323,11 +336,12 @@ def _construct_if_branch_output(
         out_node = ctx.state.add_access(out)
         return gtir_to_sdfg_types.FieldopData(out_node, sym.type, origin=())
 
-    assert isinstance(out_type, ts.FieldType)
+    assert isinstance(ctx.target_domain, domain_utils.SymbolicDomain)
     assert isinstance(sym.type, ts.FieldType)
     dims, origin, shape = gtir_domain.get_field_layout(
         gtir_domain.extract_domain(field_domain), ctx.target_domain
     )
+    assert isinstance(out_type, ts.FieldType)
     assert dims == out_type.dims
 
     if isinstance(out_type.dtype, ts.ScalarType):
@@ -448,21 +462,16 @@ def translate_if(
 
     if isinstance(node.type, ts.TupleType):
         symbol_tree = gtir_to_sdfg_utils.make_symbol_tree("x", node.type)
-        if isinstance(node.annex.domain, tuple):
-            domain_tree = node.annex.domain
-        else:
-            # TODO(edopao): this is a workaround for some IR nodes where the inferred
-            #   domain on a tuple of fields is not a tuple, see `test_execution.py::test_ternary_operator_tuple()`
-            domain_tree = gtx_utils.tree_map(lambda _: node.annex.domain)(symbol_tree)
-            assert False  # checking if still needed
         node_output = gtx_utils.tree_map(
-            lambda _ctx,
-            sym,
+            lambda sym,
+            target_domain,
             domain,
             true_br,
             false_br,
+            _sdfg=ctx.sdfg,
+            _state=ctx.state,
             sdfg_builder=sdfg_builder: _construct_if_branch_output(
-                _ctx,
+                gtir_to_sdfg.SubgraphContext(_sdfg, _state, target_domain),
                 sdfg_builder,
                 domain,
                 sym,
@@ -470,18 +479,30 @@ def translate_if(
                 false_br,
             )
         )(
-            ctx.expand_tuple_domain(),
             symbol_tree,
-            domain_tree,
+            ctx.target_domain,
+            node.annex.domain,
             true_br_result,
             false_br_result,
         )
         gtx_utils.tree_map(
-            lambda _ctx, src, dst: _write_if_branch_output(_ctx, src, dst)
-        )(tbranch_ctx.expand_tuple_domain(), true_br_result, node_output)
+            lambda target_domain,
+            src,
+            dst,
+            _sdfg=tbranch_ctx.sdfg,
+            _state=tbranch_ctx.state: _write_if_branch_output(
+                gtir_to_sdfg.SubgraphContext(_sdfg, _state, target_domain), src, dst
+            )
+        )(tbranch_ctx.target_domain, true_br_result, node_output)
         gtx_utils.tree_map(
-            lambda _ctx, src, dst: _write_if_branch_output(_ctx, src, dst)
-        )(fbranch_ctx.expand_tuple_domain(), false_br_result, node_output)
+            lambda target_domain,
+            src,
+            dst,
+            _sdfg=fbranch_ctx.sdfg,
+            _state=fbranch_ctx.state: _write_if_branch_output(
+                gtir_to_sdfg.SubgraphContext(_sdfg, _state, target_domain), src, dst
+            )
+        )(fbranch_ctx.target_domain, false_br_result, node_output)
     else:
         node_output = _construct_if_branch_output(
             ctx,
@@ -625,8 +646,12 @@ def translate_make_tuple(
     sdfg_builder: gtir_to_sdfg.SDFGBuilder,
 ) -> gtir_to_sdfg_types.FieldopResult:
     assert cpm.is_call_to(node, "make_tuple")
-
-    return tuple(sdfg_builder.visit(arg, ctx=ctx.get_tuple_domain(i)) for i, arg in enumerate(node.args))
+    if isinstance(ctx.target_domain, domain_utils.SymbolicDomain):
+        raise ValueError(f"Expected a tuple domain, found '{ctx.target_domain}'.")
+    return tuple(
+        sdfg_builder.visit(arg, ctx=gtir_to_sdfg.SubgraphContext(ctx.sdfg, ctx.state, domain))
+        for arg, domain in zip(node.args, ctx.target_domain, strict=True)
+    )
 
 
 def translate_tuple_get(

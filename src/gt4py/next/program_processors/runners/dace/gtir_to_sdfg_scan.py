@@ -31,7 +31,11 @@ from dace import subsets as dace_subsets
 from gt4py import eve
 from gt4py.next import common as gtx_common, utils as gtx_utils
 from gt4py.next.iterator import ir as gtir
-from gt4py.next.iterator.ir_utils import common_pattern_matcher as cpm, ir_makers as im
+from gt4py.next.iterator.ir_utils import (
+    common_pattern_matcher as cpm,
+    domain_utils,
+    ir_makers as im,
+)
 from gt4py.next.program_processors.runners.dace import (
     gtir_dataflow,
     gtir_domain,
@@ -119,6 +123,7 @@ def _create_scan_field_operator_impl(
         raise NotImplementedError("scan with list output is not supported")
 
     # the memory layout of the output field follows the field operator compute domain
+    assert isinstance(ctx.target_domain, domain_utils.SymbolicDomain)
     field_dims, field_origin, field_shape = gtir_domain.get_field_layout(
         field_domain, ctx.target_domain
     )
@@ -214,6 +219,7 @@ def _create_scan_field_operator(
     Refer to `gtir_to_sdfg_primitives._create_field_operator()` for the
     description of function arguments and return values.
     """
+    assert isinstance(ctx.target_domain, domain_utils.SymbolicDomain)
     domain_dims, _, _ = gtir_domain.get_field_layout(domain, ctx.target_domain)
 
     # create a map scope to execute the `LoopRegion` over the horizontal domain
@@ -256,7 +262,7 @@ def _create_scan_field_operator(
         # the tree structure of the `TupleType` definition to pass to `tree_map()`
         output_symbol_tree = gtir_to_sdfg_utils.make_symbol_tree("x", node_type)
         return gtx_utils.tree_map(
-            lambda _ctx, _edge, _sym: (
+            lambda _edge, _sym, _ctx=ctx: (
                 _create_scan_field_operator_impl(
                     _ctx,
                     sdfg_builder,
@@ -266,7 +272,7 @@ def _create_scan_field_operator(
                     map_exit,
                 )
             )
-        )(ctx.expand_tuple_domain(), output_tree, output_symbol_tree)
+        )(output_tree, output_symbol_tree)
 
 
 def _scan_input_name(input_name: str) -> str:
@@ -588,6 +594,9 @@ def translate_scan(
     scan_expr, _ = fun_node.args
     assert cpm.is_call_to(scan_expr, "scan")
 
+    if not isinstance(node.annex.domain, domain_utils.SymbolicDomain):
+        raise NotImplementedError()
+
     # parse the domain of the scan field operator
     domain = gtir_domain.extract_domain(node.annex.domain)
 
@@ -690,10 +699,10 @@ def translate_scan(
     # for output connections, we create temporary arrays that contain the computation
     # results of a column slice for each point in the horizontal domain
     lambda_output_tree = gtx_utils.tree_map(
-        lambda _lambda_ctx, _ctx, lambda_output_data: _connect_nested_sdfg_output_to_temporaries(
-            _lambda_ctx, _ctx, nsdfg_node, lambda_output_data
+        lambda lambda_output_data: _connect_nested_sdfg_output_to_temporaries(
+            lambda_ctx, ctx, nsdfg_node, lambda_output_data
         )
-    )(lambda_ctx.expand_tuple_domain(), ctx.expand_tuple_domain(), lambda_output)
+    )(lambda_output)
 
     # we call a helper method to create a map scope that will compute the entire field
     return _create_scan_field_operator(

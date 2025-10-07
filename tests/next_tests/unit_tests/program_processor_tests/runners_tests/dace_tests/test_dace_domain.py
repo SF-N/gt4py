@@ -53,7 +53,35 @@ def test_simplify_domain_expr(param):
     assert gtx_dace_domain.simplify_domain_expr(expr, symbolic_domain) == expected_expr
 
 
-def test_extract_domain():
+def test_gtir_domain():
+    Vertex = gtx_common.Dimension(value="Vertex", kind=gtx_common.DimensionKind.HORIZONTAL)
+    KDim = gtx_common.Dimension(value="KDim", kind=gtx_common.DimensionKind.VERTICAL)
+
+    symbolic_domain = domain_utils.SymbolicDomain.from_expr(
+        im.domain(
+            gtx_common.GridType.UNSTRUCTURED,
+            ranges={
+                Vertex: (1, 10),
+                KDim: (2, 20),
+            },
+        )
+    )
+
+    assert gtir_domain.extract_domain(symbolic_domain) == [
+        gtir_domain.FieldopDomainRange(
+            Vertex,
+            1,
+            10,
+        ),
+        gtir_domain.FieldopDomainRange(
+            KDim,
+            2,
+            20,
+        ),
+    ]
+
+
+def test_symbolic_domain():
     Vertex = gtx_common.Dimension(value="Vertex", kind=gtx_common.DimensionKind.HORIZONTAL)
     KDim = gtx_common.Dimension(value="KDim", kind=gtx_common.DimensionKind.VERTICAL)
 

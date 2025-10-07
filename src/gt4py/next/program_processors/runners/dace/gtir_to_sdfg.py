@@ -19,7 +19,6 @@ import dataclasses
 import itertools
 from typing import (
     Any,
-    Callable,
     Dict,
     Iterable,
     List,
@@ -137,16 +136,6 @@ class SubgraphContext:
     sdfg: dace.SDFG
     state: dace.SDFGState
     target_domain: gtir_domain.TargetDomain
-
-    def get_tuple_domain(self, index: int) -> SubgraphContext:
-        if not isinstance(self.target_domain, tuple):
-            raise ValueError("Expected a tuple of domains.")
-        return SubgraphContext(self.sdfg, self.state, self.target_domain[index])
-
-    def expand_tuple_domain(self) -> tuple[SubgraphContext, ...]:
-        if not isinstance(self.target_domain, tuple):
-            raise ValueError("Expected a tuple of domains.")
-        return gtx_utils.tree_map(lambda domain, _sdfg=self.sdfg, _state=self.state: SubgraphContext(_sdfg, _state, domain))(self.target_domain)
 
 
 class SDFGBuilder(DataflowBuilder, Protocol):
@@ -540,7 +529,7 @@ class GTIRToSDFG(eve.NodeVisitor, SDFGBuilder):
     def _visit_expression(
         self,
         node: gtir.Expr,
-        domain: domain_utils.SymbolicDomain,
+        domain: gtir_domain.TargetDomain,
         sdfg: dace.SDFG,
         head_state: dace.SDFGState,
         use_temp: bool = True,
@@ -713,12 +702,19 @@ class GTIRToSDFG(eve.NodeVisitor, SDFGBuilder):
         """
 
         # visit the domain expression
-        domain = gtir_domain.DomainParser.apply(stmt.domain)
-        source_fields = self._visit_expression(stmt.expr, domain, sdfg, state)
+        domain = gtir_domain.DomainParser().apply(stmt.domain)
+        if isinstance(stmt.expr.annex.domain, tuple) and isinstance(
+            domain, domain_utils.SymbolicDomain
+        ):
+            domain_tree = gtx_utils.tree_map(lambda x: domain)(stmt.expr.annex.domain)
+        else:
+            domain_tree = domain
+
+        source_tree = self._visit_expression(stmt.expr, domain_tree, sdfg, state)
 
         # the target expression could be a `SymRef` to an output node or a `make_tuple` expression
         # in case the statement returns more than one field
-        target_fields = self._visit_expression(stmt.target, domain, sdfg, state, use_temp=False)
+        target_tree = self._visit_expression(stmt.target, domain_tree, sdfg, state, use_temp=False)
 
         expr_input_args = {
             sym_id
@@ -744,9 +740,9 @@ class GTIRToSDFG(eve.NodeVisitor, SDFGBuilder):
             assert not target_desc.transient
 
             assert source.gt_type == target.gt_type
-            field_domain = gtir_domain.extract_domain(target_domain)
-            source_subset = _make_access_index_for_field(field_domain, source)
-            target_subset = _make_access_index_for_field(field_domain, target)
+            compute_domain = gtir_domain.extract_domain(target_domain)
+            source_subset = _make_access_index_for_field(compute_domain, source)
+            target_subset = _make_access_index_for_field(compute_domain, target)
 
             if target.dc_node.data in state_input_data:
                 # if inout argument, write the result in separate next state
@@ -772,7 +768,7 @@ class GTIRToSDFG(eve.NodeVisitor, SDFGBuilder):
                     ),
                 )
 
-        gtx_utils.tree_map(_visit_target)(source_fields, target_fields, domain)
+        gtx_utils.tree_map(_visit_target)(source_tree, target_tree, domain_tree)
 
         return target_state
 
