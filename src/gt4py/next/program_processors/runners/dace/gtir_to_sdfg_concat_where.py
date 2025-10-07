@@ -87,8 +87,7 @@ def _make_concat_scalar_broadcast(
     """
     assert isinstance(inp.gt_type, ts.FieldType)
     assert len(inp.gt_type.dims) == 1
-    assert isinstance(ctx.target_domain, domain_utils.SymbolicDomain)
-    out_dims, out_origin, out_shape = gtir_domain.get_field_layout(out_domain, ctx.target_domain)
+    out_dims, out_origin, out_shape = gtir_domain.get_field_layout(out_domain)
     out_type = ts.FieldType(dims=out_dims, dtype=inp.gt_type.dtype)
 
     out_name, out_desc = ctx.sdfg.add_temp_transient(out_shape, inp_desc.dtype)
@@ -154,6 +153,9 @@ def _translate_concat_where_impl(
     Returns:
         The field resulted from concatanating the input fields on the lower and upper domain.
     """
+    # We already checked `ctx.target_domain` in `translate_concat_where()`.
+    assert isinstance(ctx.target_domain, domain_utils.SymbolicDomain)
+
     tb_data_desc, fb_data_desc = (inp.dc_node.desc(ctx.sdfg) for inp in [tb_field, fb_field])
     assert tb_data_desc.dtype == fb_data_desc.dtype
 
@@ -182,10 +184,7 @@ def _translate_concat_where_impl(
 
     # we use the concat domain, stored in the annex, as the domain of output field
     output_domain = gtir_domain.extract_domain(node_domain)
-    assert isinstance(ctx.target_domain, domain_utils.SymbolicDomain)
-    output_dims, output_origin, output_shape = gtir_domain.get_field_layout(
-        output_domain, ctx.target_domain
-    )
+    output_dims, output_origin, output_shape = gtir_domain.get_field_layout(output_domain)
     concat_dim_index = output_dims.index(concat_domain.dim)
 
     """

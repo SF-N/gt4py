@@ -123,10 +123,7 @@ def _create_scan_field_operator_impl(
         raise NotImplementedError("scan with list output is not supported")
 
     # the memory layout of the output field follows the field operator compute domain
-    assert isinstance(ctx.target_domain, domain_utils.SymbolicDomain)
-    field_dims, field_origin, field_shape = gtir_domain.get_field_layout(
-        field_domain, ctx.target_domain
-    )
+    field_dims, field_origin, field_shape = gtir_domain.get_field_layout(field_domain)
     field_indices = gtir_domain.get_domain_indices(field_dims, field_origin)
     field_subset = dace_subsets.Range.from_indices(field_indices)
 
@@ -219,8 +216,7 @@ def _create_scan_field_operator(
     Refer to `gtir_to_sdfg_primitives._create_field_operator()` for the
     description of function arguments and return values.
     """
-    assert isinstance(ctx.target_domain, domain_utils.SymbolicDomain)
-    domain_dims, _, _ = gtir_domain.get_field_layout(domain, ctx.target_domain)
+    domain_dims, _, _ = gtir_domain.get_field_layout(domain)
 
     # create a map scope to execute the `LoopRegion` over the horizontal domain
     if len(domain_dims) == 1:
