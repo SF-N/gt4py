@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any, Iterable, Optional, Protocol
 import dace
 from dace import subsets as dace_subsets
 
+from gt4py.eve.extended_typing import MaybeNestedInTuple
 from gt4py.next import common as gtx_common, utils as gtx_utils
 from gt4py.next.iterator import ir as gtir
 from gt4py.next.iterator.ir_utils import (
@@ -21,6 +22,7 @@ from gt4py.next.iterator.ir_utils import (
     domain_utils,
     ir_makers as im,
 )
+from gt4py.next.iterator.transforms import infer_domain
 from gt4py.next.program_processors.runners.dace import (
     gtir_dataflow,
     gtir_domain,
@@ -68,18 +70,11 @@ class PrimitiveTranslator(Protocol):
 
 
 def _parse_fieldop_arg(
-    node: gtir.Expr,
+    arg: gtir_to_sdfg_types.FieldopResult,
     ctx: gtir_to_sdfg.SubgraphContext,
-    sdfg_builder: gtir_to_sdfg.SDFGBuilder,
     domain: gtir_domain.FieldopDomain,
-) -> (
-    gtir_dataflow.IteratorExpr
-    | gtir_dataflow.MemletExpr
-    | tuple[gtir_dataflow.IteratorExpr | gtir_dataflow.MemletExpr | tuple[Any, ...], ...]
-):
+) -> MaybeNestedInTuple[gtir_dataflow.IteratorExpr | gtir_dataflow.MemletExpr]:
     """Helper method to visit an expression passed as argument to a field operator."""
-
-    arg = sdfg_builder.visit(node, ctx=ctx)
 
     if not isinstance(arg, gtir_to_sdfg_types.FieldopData):
         assert isinstance(arg, tuple)
@@ -261,12 +256,49 @@ def translate_as_fieldop(
     assert cpm.is_call_to(node.fun, "as_fieldop")
     assert isinstance(node.type, (ts.FieldType, ts.TupleType))
 
+    # parse the domain of the scan field operator
+    if isinstance(node.annex.domain, domain_utils.SymbolicDomain):
+        domain = gtir_domain.extract_domain(node.annex.domain)
+        fieldop_ctx = ctx
+    else:
+        compute_domain = [
+            d for d in node.annex.domain if d != infer_domain.DomainAccessDescriptor.NEVER
+        ]
+        if len(compute_domain) == 0:
+            raise ValueError("Field operator with empty domain.")
+        elif isinstance(compute_domain[0], domain_utils.SymbolicDomain):
+            # Assume all field domains have the same extent, take the first one
+            domain = gtir_domain.extract_domain(compute_domain[0])
+        else:
+            # All fields of a tuple iterator should have the same domain.
+            # Note: this case should oly happen in iterator tests!
+            tuple_domains = [
+                d
+                for d in gtx_utils.flatten_nested_tuple(compute_domain[0])
+                if d != infer_domain.DomainAccessDescriptor.NEVER
+            ]
+            if len(set(tuple_domains)) != 1:
+                raise ValueError(
+                    "Field operator is expected to have the same domain for all tuple fields."
+                )
+            domain = gtir_domain.extract_domain(tuple_domains[0])
+        fieldop_ctx = gtir_to_sdfg.SubgraphContext(
+            sdfg=ctx.sdfg,
+            state=ctx.state,
+            target_domain=gtx_utils.tree_map(lambda x, _ctx=ctx: _ctx.target_domain)(
+                node.annex.domain
+            ),
+        )
+
     fun_node = node.fun
     assert len(fun_node.args) == 2
     fieldop_expr, _ = fun_node.args
 
+    # visit the list of arguments to be passed to the lambda expression
+    fieldop_args = [sdfg_builder.visit(arg, ctx=ctx) for arg in node.args]
+
     if cpm.is_call_to(fieldop_expr, "scan"):
-        return translate_scan(node, ctx, sdfg_builder)
+        return translate_scan(node, fieldop_ctx, sdfg_builder, domain, fieldop_args)
 
     if cpm.is_ref_to(fieldop_expr, "deref"):
         # Special usage of 'deref' as argument to fieldop expression, to pass a scalar
@@ -284,31 +316,15 @@ def translate_as_fieldop(
             f"Expression type '{type(fieldop_expr)}' not supported as argument to 'as_fieldop' node."
         )
 
-    # parse the domain of the field operator
-    if isinstance(node.annex.domain, domain_utils.SymbolicDomain):
-        domain = gtir_domain.extract_domain(node.annex.domain)
-    else:
-        # a field operator returning a tuple of fields should have the same domain on all fields
-        node_annex_domain: domain_utils.SymbolicDomain | None = None
-        for _domain in gtx_utils.flatten_nested_tuple(node.annex.domain):
-            if node_annex_domain is None:
-                node_annex_domain = _domain
-            elif _domain != node_annex_domain:
-                raise ValueError(
-                    "Field operator is expected to have the same domain for all tuple fields."
-                )
-        assert node_annex_domain is not None
-        domain = gtir_domain.extract_domain(node_annex_domain)
-
-    # visit the list of arguments to be passed to the lambda expression
-    fieldop_args = [_parse_fieldop_arg(arg, ctx, sdfg_builder, domain) for arg in node.args]
-
     # represent the field operator as a mapped tasklet graph, which will range over the field domain
+    iterator_args = [_parse_fieldop_arg(arg, ctx, domain) for arg in fieldop_args]
     input_edges, output_edges = gtir_dataflow.translate_lambda_to_dataflow(
-        ctx.sdfg, ctx.state, sdfg_builder, stencil_expr, fieldop_args
+        ctx.sdfg, ctx.state, sdfg_builder, stencil_expr, iterator_args
     )
 
-    return _create_field_operator(ctx, domain, node.type, sdfg_builder, input_edges, output_edges)
+    return _create_field_operator(
+        fieldop_ctx, domain, node.type, sdfg_builder, input_edges, output_edges
+    )
 
 
 def _construct_if_branch_output(
@@ -665,7 +681,7 @@ def translate_tuple_get(
     if isinstance(data_nodes, gtir_to_sdfg_types.FieldopData):
         raise ValueError(f"Invalid tuple expression {node}")
     unused_arg_nodes: Iterable[gtir_to_sdfg_types.FieldopData] = gtx_utils.flatten_nested_tuple(
-        tuple(arg for i, arg in enumerate(data_nodes) if i != index)
+        tuple(arg for i, arg in enumerate(data_nodes) if arg is not None and i != index)
     )
     ctx.state.remove_nodes_from(
         [arg.dc_node for arg in unused_arg_nodes if ctx.state.degree(arg.dc_node) == 0]
@@ -775,6 +791,5 @@ if TYPE_CHECKING:
         translate_make_tuple,
         translate_tuple_get,
         translate_scalar_expr,
-        translate_scan,
         translate_symbol_ref,
     ]

@@ -23,7 +23,7 @@ def get_field_domain_symbols(
     array_desc: dace.data.Array, domain: gtx_common.Domain
 ) -> dict[str, int]:
     assert gtx_common.Domain.is_finite(domain)
-    array_symbols = {}
+    array_symbols: dict[str, int] = {}
     for dim, r, size in zip(domain.dims, domain.ranges, array_desc.shape, strict=True):
         if isinstance(size, int) or str(size).isdigit():
             assert dim.kind == gtx_common.DimensionKind.LOCAL

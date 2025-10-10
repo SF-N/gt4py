@@ -9,13 +9,14 @@
 from __future__ import annotations
 
 import dataclasses
-from typing import Any, Optional, Sequence, TypeAlias
+from typing import Optional, Sequence, TypeAlias
 
 import dace
 import sympy
 from dace import subsets as dace_subsets
 
 from gt4py import eve
+from gt4py.eve.extended_typing import MaybeNestedInTuple
 from gt4py.next import common as gtx_common
 from gt4py.next.iterator import ir as gtir
 from gt4py.next.iterator.ir_utils import common_pattern_matcher as cpm, domain_utils
@@ -42,9 +43,7 @@ FieldopDomain: TypeAlias = list[FieldopDomainRange]
 """Domain of a field operator represented as a list of `FieldopDomainRange` for each dimension."""
 
 
-TargetDomain: TypeAlias = (
-    domain_utils.SymbolicDomain | tuple[domain_utils.SymbolicDomain | tuple[Any, ...], ...]
-)
+TargetDomain: TypeAlias = MaybeNestedInTuple[domain_utils.SymbolicDomain]
 
 
 def extract_domain(node: domain_utils.SymbolicDomain) -> FieldopDomain:
@@ -65,13 +64,13 @@ def extract_domain(node: domain_utils.SymbolicDomain) -> FieldopDomain:
 
 
 class DomainParser(eve.visitors.NodeTranslator):
-    def visit_FunCall(self, node: gtir.FunCall) -> TargetDomain:
+    def visit_FunCall(self, node: gtir.FunCall) -> MaybeNestedInTuple[domain_utils.SymbolicDomain]:
         if cpm.is_call_to(node, "make_tuple"):
             return tuple(self.visit(arg) for arg in node.args)
         else:
             return domain_utils.SymbolicDomain.from_expr(node)
 
-    def apply(cls, node: gtir.Expr) -> TargetDomain:
+    def apply(cls, node: gtir.Expr) -> MaybeNestedInTuple[domain_utils.SymbolicDomain]:
         return cls.visit(node)
 
 
