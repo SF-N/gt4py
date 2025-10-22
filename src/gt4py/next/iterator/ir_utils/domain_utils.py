@@ -53,13 +53,10 @@ class SymbolicRange:
     def translate(self, distance: int) -> SymbolicRange:
         return SymbolicRange(im.plus(self.start, distance), im.plus(self.stop, distance))
 
-    def empty(self) -> Optional[bool]:
+    def empty(self) -> bool | None:
         if isinstance(self.start, itir.Literal) and isinstance(self.stop, itir.Literal):
             start, stop = int(self.start.value), int(self.stop.value)
-            if start >= stop:
-                return True
-            else:
-                return False
+            return start >= stop
         elif self.start == self.stop:
             return True
         return None
@@ -79,7 +76,7 @@ class SymbolicDomain:
     def __hash__(self) -> int:
         return hash((self.grid_type, frozenset(self.ranges.items())))
 
-    def empty(self) -> Optional[bool]:
+    def empty(self) -> bool | None:
         if any(r.empty() for r in self.ranges.values()):
             return True
         if any(r.empty() is None for r in self.ranges.values()):
@@ -128,7 +125,7 @@ class SymbolicDomain:
         if len(shift) == 2:
             off, val = shift
             assert isinstance(off, itir.OffsetLiteral) and isinstance(off.value, str)
-            connectivity_type = offset_provider_type[off.value]
+            connectivity_type = common.get_offset_type(offset_provider_type, off.value)
 
             if isinstance(connectivity_type, common.Dimension):
                 if val is trace_shifts.Sentinel.VALUE:
