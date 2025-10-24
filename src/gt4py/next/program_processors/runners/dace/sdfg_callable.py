@@ -14,33 +14,20 @@ from typing import Any, Optional
 import dace
 
 from gt4py._core import definitions as core_defs
-from gt4py.next import common as gtx_common, field_utils, utils as gtx_utils
+from gt4py.next import common as gtx_common, field_utils
 
 from . import utils as gtx_dace_utils
 
 
-def get_field_domain_symbols(
-    array_desc: dace.data.Array, domain: gtx_common.Domain
-) -> dict[str, int]:
+def get_field_domain_symbols(name: str, domain: gtx_common.Domain) -> dict[str, int]:
     assert gtx_common.Domain.is_finite(domain)
-    array_symbols: dict[str, int] = {}
-    for dim, r, size in zip(domain.dims, domain.ranges, array_desc.shape, strict=True):
-        if isinstance(size, int) or str(size).isdigit():
-            assert dim.kind == gtx_common.DimensionKind.LOCAL
-            assert size == (r.stop - r.start)
-        else:
-            assert dim.kind != gtx_common.DimensionKind.LOCAL
-            assert len(size.free_symbols) == 2
-            range_symbols = [str(sym) for sym in size.free_symbols]
-            assert all(gtx_dace_utils.is_range_symbol(sym) for sym in range_symbols)
-            if range_symbols[0].endswith("_1"):
-                # sort range symbols
-                range_symbols = [range_symbols[1], range_symbols[0]]
-            array_symbols |= {
-                range_symbols[0]: r.start,
-                range_symbols[1]: r.stop,
-            }
-    return array_symbols
+    return {
+        gtx_dace_utils.range_start_symbol(name, dim): r.start
+        for dim, r in zip(domain.dims, domain.ranges, strict=True)
+    } | {
+        gtx_dace_utils.range_stop_symbol(name, dim): r.stop
+        for dim, r in zip(domain.dims, domain.ranges, strict=True)
+    }
 
 
 def get_array_shape_symbols(
@@ -84,15 +71,12 @@ def _get_args(sdfg: dace.SDFG, args: Sequence[Any]) -> dict[str, Any]:
     call_args = {}
     range_symbols: dict[str, int] = {}
     stride_symbols: dict[str, int] = {}
-    flat_args = gtx_utils.flatten_nested_tuple(tuple(args))
-    for name, arg in zip(sdfg.arg_names, flat_args, strict=True):
+    for name, arg in zip(sdfg.arg_names, args, strict=True):
         call_arg, domain = _convert_arg(arg)
         call_args[name] = call_arg
         if domain is not None:
-            desc = sdfg.arrays[name]
-            assert isinstance(desc, dace.data.Array)
-            range_symbols |= get_field_domain_symbols(desc, domain)
-            stride_symbols |= get_array_stride_symbols(desc, call_arg)
+            range_symbols |= get_field_domain_symbols(name, domain)
+            stride_symbols |= get_array_stride_symbols(sdfg.arrays[name], call_arg)
     # sanity check in case range symbols are passed as explicit program arguments
     assert all(
         call_arg == range_symbols[param]
