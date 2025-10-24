@@ -259,7 +259,6 @@ def translate_as_fieldop(
     # parse the domain of the scan field operator
     if isinstance(node.annex.domain, domain_utils.SymbolicDomain):
         domain = gtir_domain.extract_domain(node.annex.domain)
-        fieldop_ctx = ctx
     else:
         compute_domain = [
             d for d in node.annex.domain if d != infer_domain.DomainAccessDescriptor.NEVER
@@ -282,13 +281,6 @@ def translate_as_fieldop(
                     "Field operator is expected to have the same domain for all tuple fields."
                 )
             domain = gtir_domain.extract_domain(tuple_domains[0])
-        fieldop_ctx = gtir_to_sdfg.SubgraphContext(
-            sdfg=ctx.sdfg,
-            state=ctx.state,
-            target_domain=gtx_utils.tree_map(lambda x, _ctx=ctx: _ctx.target_domain)(
-                node.annex.domain
-            ),
-        )
 
     fun_node = node.fun
     assert len(fun_node.args) == 2
@@ -298,7 +290,7 @@ def translate_as_fieldop(
     fieldop_args = [sdfg_builder.visit(arg, ctx=ctx) for arg in node.args]
 
     if cpm.is_call_to(fieldop_expr, "scan"):
-        return translate_scan(node, fieldop_ctx, sdfg_builder, domain, fieldop_args)
+        return translate_scan(node, ctx, sdfg_builder, domain, fieldop_args)
 
     if cpm.is_ref_to(fieldop_expr, "deref"):
         # Special usage of 'deref' as argument to fieldop expression, to pass a scalar
@@ -322,9 +314,7 @@ def translate_as_fieldop(
         ctx.sdfg, ctx.state, sdfg_builder, stencil_expr, iterator_args
     )
 
-    return _create_field_operator(
-        fieldop_ctx, domain, node.type, sdfg_builder, input_edges, output_edges
-    )
+    return _create_field_operator(ctx, domain, node.type, sdfg_builder, input_edges, output_edges)
 
 
 def _construct_if_branch_output(
@@ -457,13 +447,13 @@ def translate_if(
 
     # expect true branch as second argument
     true_state = ctx.sdfg.add_state(ctx.state.label + "_true_branch")
-    tbranch_ctx = gtir_to_sdfg.SubgraphContext(ctx.sdfg, true_state, ctx.target_domain)
+    tbranch_ctx = gtir_to_sdfg.SubgraphContext(ctx.sdfg, true_state)
     ctx.sdfg.add_edge(cond_state, true_state, dace.InterstateEdge(condition=if_stmt))
     ctx.sdfg.add_edge(true_state, ctx.state, dace.InterstateEdge())
 
     # and false branch as third argument
     false_state = ctx.sdfg.add_state(ctx.state.label + "_false_branch")
-    fbranch_ctx = gtir_to_sdfg.SubgraphContext(ctx.sdfg, false_state, ctx.target_domain)
+    fbranch_ctx = gtir_to_sdfg.SubgraphContext(ctx.sdfg, false_state)
     ctx.sdfg.add_edge(cond_state, false_state, dace.InterstateEdge(condition=f"not({if_stmt})"))
     ctx.sdfg.add_edge(false_state, ctx.state, dace.InterstateEdge())
 
@@ -474,14 +464,12 @@ def translate_if(
         symbol_tree = gtir_to_sdfg_utils.make_symbol_tree("x", node.type)
         node_output = gtx_utils.tree_map(
             lambda sym,
-            target_domain,
             domain,
             true_br,
             false_br,
-            _sdfg=ctx.sdfg,
-            _state=ctx.state,
+            _ctx=ctx,
             sdfg_builder=sdfg_builder: _construct_if_branch_output(
-                gtir_to_sdfg.SubgraphContext(_sdfg, _state, target_domain),
+                _ctx,
                 sdfg_builder,
                 domain,
                 sym,
@@ -490,29 +478,16 @@ def translate_if(
             )
         )(
             symbol_tree,
-            ctx.target_domain,
             node.annex.domain,
             true_br_result,
             false_br_result,
         )
         gtx_utils.tree_map(
-            lambda target_domain,
-            src,
-            dst,
-            _sdfg=tbranch_ctx.sdfg,
-            _state=tbranch_ctx.state: _write_if_branch_output(
-                gtir_to_sdfg.SubgraphContext(_sdfg, _state, target_domain), src, dst
-            )
-        )(tbranch_ctx.target_domain, true_br_result, node_output)
+            lambda src, dst, _ctx=tbranch_ctx: _write_if_branch_output(_ctx, src, dst)
+        )(true_br_result, node_output)
         gtx_utils.tree_map(
-            lambda target_domain,
-            src,
-            dst,
-            _sdfg=fbranch_ctx.sdfg,
-            _state=fbranch_ctx.state: _write_if_branch_output(
-                gtir_to_sdfg.SubgraphContext(_sdfg, _state, target_domain), src, dst
-            )
-        )(fbranch_ctx.target_domain, false_br_result, node_output)
+            lambda src, dst, _ctx=fbranch_ctx: _write_if_branch_output(_ctx, src, dst)
+        )(false_br_result, node_output)
     else:
         node_output = _construct_if_branch_output(
             ctx,
@@ -656,12 +631,7 @@ def translate_make_tuple(
     sdfg_builder: gtir_to_sdfg.SDFGBuilder,
 ) -> gtir_to_sdfg_types.FieldopResult:
     assert cpm.is_call_to(node, "make_tuple")
-    if isinstance(ctx.target_domain, domain_utils.SymbolicDomain):
-        raise ValueError(f"Expected a tuple domain, found '{ctx.target_domain}'.")
-    return tuple(
-        sdfg_builder.visit(arg, ctx=gtir_to_sdfg.SubgraphContext(ctx.sdfg, ctx.state, domain))
-        for arg, domain in zip(node.args, ctx.target_domain, strict=True)
-    )
+    return tuple(sdfg_builder.visit(arg, ctx=ctx) for arg in node.args)
 
 
 def translate_tuple_get(

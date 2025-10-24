@@ -74,31 +74,6 @@ class DomainParser(eve.visitors.NodeTranslator):
         return cls.visit(node)
 
 
-def simplify_domain_expr(
-    expr: sympy.Basic, domain: domain_utils.SymbolicDomain
-) -> dace.symbolic.SymbolicType:
-    """Simplifies a symbolic expression by applying constraints from domain range.
-
-    Dace uses sympy for symbolic expressions in the SDFG. By applying assumptions
-    on a sympy expression, we may obtain a simplified expression.
-    This is particularly important in the lowering of concat_where domain expressions,
-    because it usually results in cleaner memlet subsets and better map fusion.
-
-    Args:
-        expr: The symbolic expression to simplify.
-    Returns:
-        A new symbolic expression.
-    """
-    for dim_range in extract_domain(domain):
-        # We want to enforce the constraint `ub = lb + size`. The actual constraint
-        # is given by the assumption that the `size` variable is integer and non-negative.
-        size = sympy.var(f"__gtir_{dim_range.dim.value}_size", integer=True, negative=False)
-        expr = expr.subs(dim_range.start, dim_range.stop - size).subs(
-            size, dim_range.stop - dim_range.start
-        )
-    return dace.symbolic.simplify_ext(expr)
-
-
 def get_domain_indices(
     dims: Sequence[gtx_common.Dimension], origin: Optional[Sequence[dace.symbolic.SymExpr]]
 ) -> dace_subsets.Indices:

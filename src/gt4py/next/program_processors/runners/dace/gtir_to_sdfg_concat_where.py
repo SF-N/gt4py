@@ -15,7 +15,6 @@ translators in `gtir_to_sdfg_primitives` module.
 from __future__ import annotations
 
 import dace
-import sympy
 from dace import subsets as dace_subsets
 
 from gt4py.next import common as gtx_common, utils as gtx_utils
@@ -153,9 +152,6 @@ def _translate_concat_where_impl(
     Returns:
         The field resulted from concatanating the input fields on the lower and upper domain.
     """
-    # We already checked `ctx.target_domain` in `translate_concat_where()`.
-    assert isinstance(ctx.target_domain, domain_utils.SymbolicDomain)
-
     tb_data_desc, fb_data_desc = (inp.dc_node.desc(ctx.sdfg) for inp in [tb_field, fb_field])
     assert tb_data_desc.dtype == fb_data_desc.dtype
 
@@ -258,9 +254,8 @@ def _translate_concat_where_impl(
             concat_dim_index,
             gtir_domain.FieldopDomainRange(
                 dim=concat_domain.dim,
-                start=gtir_domain.simplify_domain_expr(
-                    sympy.Max(concat_dim_bound - 1, output_domain[concat_dim_index].start),
-                    ctx.target_domain,
+                start=dace.symbolic.pystr_to_symbolic(
+                    f"max({concat_dim_bound - 1}, {output_domain[concat_dim_index].start})"
                 ),
                 stop=concat_dim_bound,
             ),
@@ -287,9 +282,8 @@ def _translate_concat_where_impl(
             gtir_domain.FieldopDomainRange(
                 dim=concat_domain.dim,
                 start=concat_dim_bound,
-                stop=gtir_domain.simplify_domain_expr(
-                    sympy.Min(concat_dim_bound + 1, output_domain[concat_dim_index].stop),
-                    ctx.target_domain,
+                stop=dace.symbolic.pystr_to_symbolic(
+                    f"min({concat_dim_bound + 1}, {output_domain[concat_dim_index].stop})"
                 ),
             ),
         )
@@ -360,16 +354,14 @@ def _translate_concat_where_impl(
     assert all(ftype.dims == output_dims for ftype in (lower.gt_type, upper.gt_type))  # type: ignore[union-attr]
 
     lower_range_0 = output_domain[concat_dim_index].start
-    lower_range_1 = gtir_domain.simplify_domain_expr(
-        sympy.Max(lower_range_0, lower_domain[concat_dim_index].stop),
-        ctx.target_domain,
+    lower_range_1 = dace.symbolic.pystr_to_symbolic(
+        f"max({lower_range_0}, {lower_domain[concat_dim_index].stop})"
     )
     lower_range_size = lower_range_1 - lower_range_0
 
     upper_range_1 = output_domain[concat_dim_index].stop
-    upper_range_0 = gtir_domain.simplify_domain_expr(
-        sympy.Min(upper_range_1, upper_domain[concat_dim_index].start),
-        ctx.target_domain,
+    upper_range_0 = dace.symbolic.pystr_to_symbolic(
+        f"min({upper_range_1}, {upper_domain[concat_dim_index].start})"
     )
     upper_range_size = upper_range_1 - upper_range_0
 
@@ -462,11 +454,6 @@ def translate_concat_where(
     """
     assert cpm.is_call_to(node, "concat_where")
     assert len(node.args) == 3
-
-    if not isinstance(ctx.target_domain, domain_utils.SymbolicDomain):
-        raise NotImplementedError(
-            f"Expected concat_where on a field domain, found target '{ctx.target_domain}'."
-        )
 
     # First argument is a domain expression that defines the mask of the true branch:
     # we extract the dimension along which we need to concatenate the field arguments,

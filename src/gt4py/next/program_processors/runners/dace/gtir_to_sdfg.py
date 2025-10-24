@@ -134,7 +134,6 @@ class SubgraphContext:
 
     sdfg: dace.SDFG
     state: dace.SDFGState
-    target_domain: gtir_domain.TargetDomain
 
 
 class SDFGBuilder(DataflowBuilder, Protocol):
@@ -315,7 +314,7 @@ class GTIRToSDFG(eve.NodeVisitor, SDFGBuilder):
         sdfg = dace.SDFG(name=self.unique_nsdfg_name(parent_ctx.sdfg, sdfg_name))
         sdfg.debuginfo = gtir_to_sdfg_utils.debug_info(expr, default=parent_ctx.sdfg.debuginfo)
         state = sdfg.add_state(f"{sdfg_name}_entry")
-        nested_ctx = SubgraphContext(sdfg, state, parent_ctx.target_domain)
+        nested_ctx = SubgraphContext(sdfg, state)
         nsdfg_builder = GTIRToSDFG(self.offset_provider_type, self.column_axis, scope_symbols)
 
         # We pass to the nested SDFG all GTIR-symbols in scope, which includes the
@@ -528,7 +527,6 @@ class GTIRToSDFG(eve.NodeVisitor, SDFGBuilder):
     def _visit_expression(
         self,
         node: gtir.Expr,
-        domain: gtir_domain.TargetDomain,
         sdfg: dace.SDFG,
         head_state: dace.SDFGState,
         use_temp: bool = True,
@@ -543,7 +541,7 @@ class GTIRToSDFG(eve.NodeVisitor, SDFGBuilder):
             The SDFG array nodes containing the result of the fieldview expression.
         """
 
-        ctx = SubgraphContext(sdfg, head_state, domain)
+        ctx = SubgraphContext(sdfg, head_state)
         result = self.visit(node, ctx=ctx)
 
         # sanity check: each statement should preserve the property of single exit state (aka head state),
@@ -700,20 +698,11 @@ class GTIRToSDFG(eve.NodeVisitor, SDFGBuilder):
           The SDFG head state, eventually updated if the target write requires a new state.
         """
 
-        # visit the domain expression
-        domain = gtir_domain.DomainParser().apply(stmt.domain)
-        if isinstance(stmt.expr.annex.domain, tuple) and isinstance(
-            domain, domain_utils.SymbolicDomain
-        ):
-            domain_tree = gtx_utils.tree_map(lambda x: domain)(stmt.expr.annex.domain)
-        else:
-            domain_tree = domain
-
-        source_tree = self._visit_expression(stmt.expr, domain_tree, sdfg, state)
+        source_tree = self._visit_expression(stmt.expr, sdfg, state)
 
         # the target expression could be a `SymRef` to an output node or a `make_tuple` expression
         # in case the statement returns more than one field
-        target_tree = self._visit_expression(stmt.target, domain_tree, sdfg, state, use_temp=False)
+        target_tree = self._visit_expression(stmt.target, sdfg, state, use_temp=False)
 
         expr_input_args = {
             sym_id
@@ -766,6 +755,15 @@ class GTIRToSDFG(eve.NodeVisitor, SDFGBuilder):
                         data=target.dc_node.data, subset=target_subset, other_subset=source_subset
                     ),
                 )
+
+        # visit the domain expression
+        domain = gtir_domain.DomainParser().apply(stmt.domain)
+        if isinstance(stmt.expr.annex.domain, tuple) and isinstance(
+            domain, domain_utils.SymbolicDomain
+        ):
+            domain_tree = gtx_utils.tree_map(lambda x: domain)(stmt.expr.annex.domain)
+        else:
+            domain_tree = domain
 
         gtx_utils.tree_map(_visit_target)(source_tree, target_tree, domain_tree)
 
