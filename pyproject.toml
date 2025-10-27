@@ -11,7 +11,7 @@ dace-cartesian = [
   'dace>=1.0.2,<2'  # renfined in [tool.uv.sources]
 ]
 dace-next = [
-  'dace>=1.0.0'  # refined in [tool.uv.sources]
+  'dace==2025.10.23'  # refined in [tool.uv.sources]
 ]
 dev = [
   {include-group = 'build'},
@@ -302,6 +302,8 @@ markers = [
   'checks_specific_error: tests that rely on the backend to produce a specific error message'
 ]
 norecursedirs = ['dist', 'build', 'cpp_backend_tests/build*', '_local/*', '.*']
+python_files = ['test_*.py', '*_test.py', 'benchmark_*.py']
+python_functions = ['test_*', 'benchmark_*']
 testpaths = 'tests'
 xfail_strict = true
 
@@ -451,7 +453,7 @@ url = 'https://test.pypi.org/simple'
 atlas4py = {index = "test.pypi"}
 dace = [
   {git = "https://github.com/GridTools/dace", branch = "romanc/stree-roundtrip", group = "dace-cartesian"},
-  {git = "https://github.com/GridTools/dace", tag = "__gt4py-next-integration_2025_09_25", group = "dace-next"}
+  {git = "https://github.com/GridTools/dace", tag = "__gt4py-next-integration_2025_10_23", group = "dace-next"}
 ]
 
 # -- versioningit --
