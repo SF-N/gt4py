@@ -653,17 +653,11 @@ class GTIRToSDFG(eve.NodeVisitor, SDFGBuilder):
         sdfg_arg_names = self._add_sdfg_params(sdfg, node.params, symbolic_params=None)
 
         # visit one statement at a time and expand the SDFG from the current head state
-        post_states = []
         for i, stmt in enumerate(node.body):
             # include `debuginfo` only for `ir.Program` and `ir.Stmt` nodes: finer granularity would be too messy
             head_state = sdfg.add_state_after(head_state, f"stmt_{i}")
             head_state._debuginfo = gtir_to_sdfg_utils.debug_info(stmt, default=sdfg.debuginfo)
-            post_state = self.visit(stmt, sdfg=sdfg, state=head_state)
-            if post_state is not None:
-                post_states.append(post_state)
-
-        for state in post_states:
-            sdfg.add_edge(head_state, state, dace.InterstateEdge())
+            head_state = self.visit(stmt, sdfg=sdfg, state=head_state)
 
         # remove unused connectivity tables (by design, arrays are marked as non-transient when they are used)
         for nsdfg in sdfg.all_sdfgs_recursive():
@@ -736,7 +730,7 @@ class GTIRToSDFG(eve.NodeVisitor, SDFGBuilder):
                 # if inout argument, write the result in separate next state
                 # this is needed to avoid undefined behavior for expressions like: X, Y = X + 1, X
                 if not target_state:
-                    target_state = sdfg.add_state(f"post_{state.label}")
+                    target_state = sdfg.add_state_after(state, f"post_{state.label}")
                 # create new access nodes in the target state
                 target_state.add_nedge(
                     target_state.add_access(source.dc_node.data),
@@ -767,7 +761,7 @@ class GTIRToSDFG(eve.NodeVisitor, SDFGBuilder):
 
         gtx_utils.tree_map(_visit_target)(source_tree, target_tree, domain_tree)
 
-        return target_state
+        return target_state or state
 
     def visit_FunCall(
         self,
