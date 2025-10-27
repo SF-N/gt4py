@@ -692,6 +692,9 @@ class GTIRToSDFG(eve.NodeVisitor, SDFGBuilder):
           The SDFG head state, eventually updated if the target write requires a new state.
         """
 
+        # visit the domain expression
+        domain = gtir_domain.DomainParser().apply(stmt.domain)
+
         source_tree = self._visit_expression(stmt.expr, sdfg, state)
 
         # the target expression could be a `SymRef` to an output node or a `make_tuple` expression
@@ -750,16 +753,7 @@ class GTIRToSDFG(eve.NodeVisitor, SDFGBuilder):
                     ),
                 )
 
-        # visit the domain expression
-        domain = gtir_domain.DomainParser().apply(stmt.domain)
-        if isinstance(stmt.expr.annex.domain, tuple) and isinstance(
-            domain, domain_utils.SymbolicDomain
-        ):
-            domain_tree = gtx_utils.tree_map(lambda x: domain)(stmt.expr.annex.domain)
-        else:
-            domain_tree = domain
-
-        gtx_utils.tree_map(_visit_target)(source_tree, target_tree, domain_tree)
+        gtx_utils.tree_map(_visit_target)(source_tree, target_tree, domain)
 
         return target_state or state
 
