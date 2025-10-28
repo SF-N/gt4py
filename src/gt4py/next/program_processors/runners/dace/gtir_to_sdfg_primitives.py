@@ -22,7 +22,6 @@ from gt4py.next.iterator.ir_utils import (
     domain_utils,
     ir_makers as im,
 )
-from gt4py.next.iterator.transforms import infer_domain
 from gt4py.next.program_processors.runners.dace import (
     gtir_dataflow,
     gtir_domain,
@@ -256,32 +255,6 @@ def translate_as_fieldop(
     assert cpm.is_call_to(node.fun, "as_fieldop")
     assert isinstance(node.type, (ts.FieldType, ts.TupleType))
 
-    # parse the domain of the scan field operator
-    if isinstance(node.annex.domain, domain_utils.SymbolicDomain):
-        domain = gtir_domain.get_field_domain(node.annex.domain)
-    else:
-        compute_domain = [
-            d for d in node.annex.domain if d != infer_domain.DomainAccessDescriptor.NEVER
-        ]
-        if len(compute_domain) == 0:
-            raise ValueError("Field operator with empty domain.")
-        elif isinstance(compute_domain[0], domain_utils.SymbolicDomain):
-            # Assume all field domains have the same extent, take the first one
-            domain = gtir_domain.get_field_domain(compute_domain[0])
-        else:
-            # All fields of a tuple iterator should have the same domain.
-            # Note: this case should oly happen in iterator tests!
-            tuple_domains = [
-                d
-                for d in gtx_utils.flatten_nested_tuple(compute_domain[0])
-                if d != infer_domain.DomainAccessDescriptor.NEVER
-            ]
-            if len(set(tuple_domains)) != 1:
-                raise ValueError(
-                    "Field operator is expected to have the same domain for all tuple fields."
-                )
-            domain = gtir_domain.get_field_domain(tuple_domains[0])
-
     fun_node = node.fun
     assert len(fun_node.args) == 2
     fieldop_expr, fieldop_domain_expr = fun_node.args
@@ -289,8 +262,14 @@ def translate_as_fieldop(
     # visit the list of arguments to be passed to the lambda expression
     fieldop_args = [sdfg_builder.visit(arg, ctx=ctx) for arg in node.args]
 
+    # visit the domain of the field operator
+    assert isinstance(fieldop_domain_expr.type, ts.DomainType)
+    fieldop_domain = gtir_domain.get_field_domain(
+        domain_utils.SymbolicDomain.from_expr(fieldop_domain_expr)
+    )
+
     if cpm.is_call_to(fieldop_expr, "scan"):
-        return translate_scan(node, ctx, sdfg_builder, domain, fieldop_args)
+        return translate_scan(node, ctx, sdfg_builder, fieldop_domain, fieldop_args)
 
     if cpm.is_ref_to(fieldop_expr, "deref"):
         # Special usage of 'deref' as argument to fieldop expression, to pass a scalar
@@ -308,14 +287,8 @@ def translate_as_fieldop(
             f"Expression type '{type(fieldop_expr)}' not supported as argument to 'as_fieldop' node."
         )
 
-    # parse the domain of the field operator
-    assert isinstance(fieldop_domain_expr.type, ts.DomainType)
-    fieldop_domain = gtir_domain.get_field_domain(
-        domain_utils.SymbolicDomain.from_expr(fieldop_domain_expr)
-    )
-
     # represent the field operator as a mapped tasklet graph, which will range over the field domain
-    iterator_args = [_parse_fieldop_arg(arg, ctx, domain) for arg in fieldop_args]
+    iterator_args = [_parse_fieldop_arg(arg, ctx, fieldop_domain) for arg in fieldop_args]
     input_edges, output_edges = gtir_dataflow.translate_lambda_to_dataflow(
         ctx.sdfg, ctx.state, sdfg_builder, stencil_expr, iterator_args
     )

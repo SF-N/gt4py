@@ -547,8 +547,8 @@ class GTIRToSDFG(eve.NodeVisitor, SDFGBuilder):
         # sanity check: each statement should preserve the property of single exit state (aka head state),
         # i.e. eventually only introduce internal branches, and keep the same head state
         sink_states = sdfg.sink_nodes()
-        assert head_state in sink_states
-        assert all(sdfg.degree(state) == 0 for state in sdfg.sink_nodes() if state != head_state)
+        assert len(sink_states) == 1
+        assert sink_states[0] == head_state
 
         def _visit_result(
             src: gtir_to_sdfg_types.FieldopData,
@@ -691,10 +691,12 @@ class GTIRToSDFG(eve.NodeVisitor, SDFGBuilder):
         Returns:
           The SDFG head state, eventually updated if the target write requires a new state.
         """
+        target_state: Optional[dace.SDFGState] = None
 
         # Visit the domain expression.
         domain = gtir_domain.DomainParser().apply(stmt.domain)
 
+        # Visit the field operator expression.
         source_tree = self._visit_expression(stmt.expr, sdfg, state)
 
         # The target expression could be a `SymRef` to an output field or a `make_tuple`
@@ -711,9 +713,6 @@ class GTIRToSDFG(eve.NodeVisitor, SDFGBuilder):
             for node in state.data_nodes()
             if node.data in expr_input_args and state.degree(node) != 0
         }
-
-        # visit the domain expression
-        target_state: Optional[dace.SDFGState] = None
 
         def _visit_target(
             source: gtir_to_sdfg_types.FieldopData,

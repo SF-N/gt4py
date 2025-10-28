@@ -39,6 +39,7 @@ def tuple_output2(inp1, inp2):
     return make_tuple(deref(inp1), deref(inp2))
 
 
+@pytest.mark.parametrize("stencil", [tuple_output1, tuple_output2])
 @pytest.mark.uses_tuple_iterator
 @pytest.mark.uses_tuple_returns
 def test_tuple_output(program_processor, stencil):
