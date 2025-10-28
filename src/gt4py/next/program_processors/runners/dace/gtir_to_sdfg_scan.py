@@ -113,7 +113,7 @@ def _create_scan_field_operator_impl(
     if output_edge is None:
         assert domain == infer_domain.DomainAccessDescriptor.NEVER
         return None
-    field_domain = gtir_domain.extract_domain(domain)
+    field_domain = gtir_domain.get_field_domain(domain)
 
     dataflow_output_desc = output_edge.result.dc_node.desc(ctx.sdfg)
     assert isinstance(dataflow_output_desc, dace.data.Array)
@@ -605,8 +605,14 @@ def translate_scan(
 
     fun_node = node.fun
     assert len(fun_node.args) == 2
-    scan_expr, _ = fun_node.args
+    scan_expr, scan_domain_expr = fun_node.args
     assert cpm.is_call_to(scan_expr, "scan")
+
+    # parse the domain of the scan field operator
+    assert isinstance(scan_domain_expr.type, ts.DomainType)
+    scan_domain = gtir_domain.get_field_domain(
+        domain_utils.SymbolicDomain.from_expr(scan_domain_expr)
+    )
 
     # parse scan parameters
     assert len(scan_expr.args) == 3
@@ -642,7 +648,7 @@ def translate_scan(
         stencil_expr,
         ctx,
         sdfg_builder,
-        domain,
+        scan_domain,
         init_data,
         lambda_symbols,
         scan_forward,

@@ -12,7 +12,6 @@ import dataclasses
 from typing import Optional, Sequence, TypeAlias
 
 import dace
-import sympy
 from dace import subsets as dace_subsets
 
 from gt4py import eve
@@ -46,20 +45,20 @@ FieldopDomain: TypeAlias = list[FieldopDomainRange]
 TargetDomain: TypeAlias = MaybeNestedInTuple[domain_utils.SymbolicDomain]
 
 
-def extract_domain(node: domain_utils.SymbolicDomain) -> FieldopDomain:
+def get_field_domain(domain: domain_utils.SymbolicDomain) -> FieldopDomain:
     """
     Visits the domain of a field operator and returns a list of dimensions and
     the corresponding lower and upper bounds. The returned lower bound is inclusive,
     the upper bound is exclusive: [lower_bound, upper_bound[
     """
-
+    sorted_dims = gtx_common.order_dimensions(domain.ranges.keys())
     return [
         FieldopDomainRange(
             dim,
-            gtir_to_sdfg_utils.get_symbolic(drange.start),
-            gtir_to_sdfg_utils.get_symbolic(drange.stop),
+            gtir_to_sdfg_utils.get_symbolic(domain.ranges[dim].start),
+            gtir_to_sdfg_utils.get_symbolic(domain.ranges[dim].stop),
         )
-        for dim, drange in node.ranges.items()
+        for dim in sorted_dims
     ]
 
 
@@ -128,7 +127,7 @@ def get_field_layout(
     domain_dims = [domain_range.dim for domain_range in field_domain]
     domain_origin = [domain_range.start for domain_range in field_domain]
     domain_shape = [
-        sympy.Max(0, (domain_range.stop - domain_range.start)).simplify()
+        dace.symbolic.pystr_to_symbolic(f"max(0, {domain_range.stop - domain_range.start})")
         for domain_range in field_domain
     ]
     return domain_dims, domain_origin, domain_shape

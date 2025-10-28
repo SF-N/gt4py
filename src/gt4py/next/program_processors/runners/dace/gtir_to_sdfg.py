@@ -692,13 +692,13 @@ class GTIRToSDFG(eve.NodeVisitor, SDFGBuilder):
           The SDFG head state, eventually updated if the target write requires a new state.
         """
 
-        # visit the domain expression
+        # Visit the domain expression.
         domain = gtir_domain.DomainParser().apply(stmt.domain)
 
         source_tree = self._visit_expression(stmt.expr, sdfg, state)
 
-        # the target expression could be a `SymRef` to an output node or a `make_tuple` expression
-        # in case the statement returns more than one field
+        # The target expression could be a `SymRef` to an output field or a `make_tuple`
+        # expression in case the statement returns more than one field.
         target_tree = self._visit_expression(stmt.target, sdfg, state, use_temp=False)
 
         expr_input_args = {
@@ -725,7 +725,7 @@ class GTIRToSDFG(eve.NodeVisitor, SDFGBuilder):
             assert not target_desc.transient
 
             assert source.gt_type == target.gt_type
-            compute_domain = gtir_domain.extract_domain(target_domain)
+            compute_domain = gtir_domain.get_field_domain(target_domain)
             source_subset = _make_access_index_for_field(compute_domain, source)
             target_subset = _make_access_index_for_field(compute_domain, target)
 
