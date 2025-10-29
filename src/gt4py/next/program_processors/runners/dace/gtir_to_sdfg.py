@@ -715,12 +715,17 @@ class GTIRToSDFG(eve.NodeVisitor, SDFGBuilder):
             if node.data in expr_input_args and state.degree(node) != 0
         }
 
+        # For inout argument, write the result in separate next state
+        # this is needed to avoid undefined behavior for expressions like: X, Y = X + 1, X
+        # If this state is not used, we remove it before returning from the function.
+        target_state = sdfg.add_state_after(state, f"post_{state.label}")
+
         def _visit_target(
             source: gtir_to_sdfg_types.FieldopData,
             target: gtir_to_sdfg_types.FieldopData,
             target_domain: domain_utils.SymbolicDomain,
+            target_state: dace.SDFGState,
         ) -> None:
-            nonlocal target_state
             target_desc = sdfg.arrays[target.dc_node.data]
             assert not target_desc.transient
 
@@ -730,10 +735,6 @@ class GTIRToSDFG(eve.NodeVisitor, SDFGBuilder):
             target_subset = _make_access_index_for_field(field_domain, target)
 
             if target.dc_node.data in state_input_data:
-                # if inout argument, write the result in separate next state
-                # this is needed to avoid undefined behavior for expressions like: X, Y = X + 1, X
-                if not target_state:
-                    target_state = sdfg.add_state_after(state, f"post_{state.label}")
                 # create new access nodes in the target state
                 target_state.add_nedge(
                     target_state.add_access(source.dc_node.data),
@@ -754,13 +755,23 @@ class GTIRToSDFG(eve.NodeVisitor, SDFGBuilder):
                 )
 
         if isinstance(domain, tuple):
-            gtx_utils.tree_map(_visit_target)(source_tree, target_tree, domain)
+            gtx_utils.tree_map(
+                lambda source, target, domain_, target_state_=target_state: _visit_target(
+                    source, target, domain_, target_state_
+                )
+            )(source_tree, target_tree, domain)
         else:
             gtx_utils.tree_map(
-                lambda source, target, _domain=domain: _visit_target(source, target, _domain)
+                lambda source, target, domain_=domain, target_state_=target_state: _visit_target(
+                    source, target, domain_, target_state_
+                )
             )(source_tree, target_tree)
 
-        return target_state or state
+        if target_state.is_empty():
+            sdfg.remove_node(target_state)
+            return state
+        else:
+            return target_state
 
     def visit_FunCall(
         self,
