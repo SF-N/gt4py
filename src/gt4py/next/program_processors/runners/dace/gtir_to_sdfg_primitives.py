@@ -231,8 +231,8 @@ def _create_field_operator(
         # handle tuples of fields
         output_symbol_tree = gtir_to_sdfg_utils.make_symbol_tree("x", node_type)
         return gtx_utils.tree_map(
-            lambda edge_, sym_, ctx_=ctx: _create_field_operator_impl(
-                ctx_, sdfg_builder, domain, edge_, sym_.type, map_exit
+            lambda edge, sym, ctx_=ctx: _create_field_operator_impl(
+                ctx_, sdfg_builder, domain, edge, sym.type, map_exit
             )
         )(output_tree, output_symbol_tree)
 
@@ -282,13 +282,13 @@ def translate_as_fieldop(
             f"Expression type '{type(fieldop_expr)}' not supported as argument to 'as_fieldop' node."
         )
 
-    # visit the domain of the field operator
+    # parse the domain of the field operator
     assert isinstance(fieldop_domain_expr.type, ts.DomainType)
     field_domain = gtir_domain.get_field_domain(
         domain_utils.SymbolicDomain.from_expr(fieldop_domain_expr)
     )
 
-    # visit the field operator arguments
+    # visit the list of arguments to be passed to the lambda expression
     fieldop_args = [_parse_fieldop_arg(arg, ctx, sdfg_builder, field_domain) for arg in node.args]
 
     # represent the field operator as a mapped tasklet graph, which will range over the field domain
