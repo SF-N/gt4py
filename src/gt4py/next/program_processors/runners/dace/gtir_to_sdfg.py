@@ -754,18 +754,24 @@ class GTIRToSDFG(eve.NodeVisitor, SDFGBuilder):
                     ),
                 )
 
-        if isinstance(domain, tuple):
-            gtx_utils.tree_map(
-                lambda source, target, domain_, target_state_=target_state: _visit_target(
-                    source, target, domain_, target_state_
-                )
-            )(source_tree, target_tree, domain)
-        else:
+        if isinstance(target_tree, tuple) and not isinstance(domain, tuple):
+            # This branch handles a specific case that indeed never happens in
+            # fieldview GTIR, only in iterator GTIR tests. The case corresponds
+            # to 'as_fieldop' with tuple output and single domain, which is a format
+            # used when multiple 'as_fieldop' are fused into one. The input to SDFG
+            # lowering is fieldview IR, where 'as_fieldop' will always have a single
+            # domain and the frontend will never emit 'as_fieldop' with tuple output.
             gtx_utils.tree_map(
                 lambda source, target, domain_=domain, target_state_=target_state: _visit_target(
                     source, target, domain_, target_state_
                 )
             )(source_tree, target_tree)
+        else:
+            gtx_utils.tree_map(
+                lambda source, target, domain_, target_state_=target_state: _visit_target(
+                    source, target, domain_, target_state_
+                )
+            )(source_tree, target_tree, domain)
 
         if target_state.is_empty():
             sdfg.remove_node(target_state)
