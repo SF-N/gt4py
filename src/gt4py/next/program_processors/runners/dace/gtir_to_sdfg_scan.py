@@ -264,13 +264,13 @@ def _create_scan_field_operator(
         # the tree structure of the `TupleType` definition to pass to `tree_map()`
         output_symbol_tree = gtir_to_sdfg_utils.make_symbol_tree("x", node_type)
         return gtx_utils.tree_map(
-            lambda _domain, _edge, _sym, _ctx=ctx: (
+            lambda domain_, edge_, sym_, ctx_=ctx: (
                 _create_scan_field_operator_impl(
-                    _ctx,
+                    ctx_,
                     sdfg_builder,
-                    _domain,
-                    _edge,
-                    _sym.type,
+                    domain_,
+                    edge_,
+                    sym_.type,
                     map_exit,
                 )
             )
