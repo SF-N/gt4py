@@ -42,9 +42,6 @@ FieldopDomain: TypeAlias = list[FieldopDomainRange]
 """Domain of a field operator represented as a list of `FieldopDomainRange` for each dimension."""
 
 
-TargetDomain: TypeAlias = MaybeNestedInTuple[domain_utils.SymbolicDomain]
-
-
 def get_field_domain(domain: domain_utils.SymbolicDomain) -> FieldopDomain:
     """
     Visits the domain of a field operator and returns a list of dimensions and
@@ -63,14 +60,23 @@ def get_field_domain(domain: domain_utils.SymbolicDomain) -> FieldopDomain:
     ]
 
 
-class DomainParser(eve.visitors.NodeTranslator):
-    def visit_FunCall(self, node: gtir.FunCall) -> MaybeNestedInTuple[domain_utils.SymbolicDomain]:
+TargetDomain: TypeAlias = MaybeNestedInTuple[domain_utils.SymbolicDomain]
+"""Symbolic domain which defines the range to write in the target field.
+
+For tuple output, the corresponding domain in fieldview is a tuple of domains.
+"""
+
+
+class TargetDomainParser(eve.visitors.NodeTranslator):
+    """Visitor class to build a `TargetDomain` symbolic domain."""
+
+    def visit_FunCall(self, node: gtir.FunCall) -> TargetDomain:
         if cpm.is_call_to(node, "make_tuple"):
             return tuple(self.visit(arg) for arg in node.args)
         else:
             return domain_utils.SymbolicDomain.from_expr(node)
 
-    def apply(cls, node: gtir.Expr) -> MaybeNestedInTuple[domain_utils.SymbolicDomain]:
+    def apply(cls, node: gtir.Expr) -> TargetDomain:
         return cls.visit(node)
 
 

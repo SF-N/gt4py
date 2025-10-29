@@ -23,7 +23,7 @@ This is likely to change in the future, to enable GTIR optimizations for scan.
 from __future__ import annotations
 
 import itertools
-from typing import Any, Iterable, Sequence
+from typing import Any, Iterable
 
 import dace
 from dace import subsets as dace_subsets
@@ -90,8 +90,8 @@ def _parse_scan_fieldop_arg(
 def _create_scan_field_operator_impl(
     ctx: gtir_to_sdfg.SubgraphContext,
     sdfg_builder: gtir_to_sdfg.SDFGBuilder,
-    domain: domain_utils.SymbolicDomain,
     output_edge: gtir_dataflow.DataflowOutputEdge | None,
+    output_domain: infer_domain.NonTupleDomainAccess,
     output_type: ts.FieldType,
     map_exit: dace.nodes.MapExit,
 ) -> gtir_to_sdfg_types.FieldopData | None:
@@ -111,9 +111,11 @@ def _create_scan_field_operator_impl(
     the description of function arguments and return values.
     """
     if output_edge is None:
-        assert domain == infer_domain.DomainAccessDescriptor.NEVER
+        # According to domain inference, this tuple field does not need to be computed.
+        assert output_domain == infer_domain.DomainAccessDescriptor.NEVER
         return None
-    field_domain = gtir_domain.get_field_domain(domain)
+    assert isinstance(output_domain, domain_utils.SymbolicDomain)
+    field_domain = gtir_domain.get_field_domain(output_domain)
 
     dataflow_output_desc = output_edge.result.dc_node.desc(ctx.sdfg)
     assert isinstance(dataflow_output_desc, dace.data.Array)
@@ -208,8 +210,8 @@ def _create_scan_field_operator(
     node_type: ts.FieldType | ts.TupleType,
     sdfg_builder: gtir_to_sdfg.SDFGBuilder,
     input_edges: Iterable[gtir_dataflow.DataflowInputEdge],
-    output_tree: MaybeNestedInTuple[gtir_dataflow.DataflowOutputEdge | None],
-    output_domain_tree: MaybeNestedInTuple[domain_utils.SymbolicDomain],
+    output: MaybeNestedInTuple[gtir_dataflow.DataflowOutputEdge | None],
+    output_domain: infer_domain.DomainAccess,
 ) -> gtir_to_sdfg_types.FieldopResult:
     """
     Helper method to build the output of a field operator, which can consist of
@@ -253,28 +255,28 @@ def _create_scan_field_operator(
         edge.connect(map_entry)
 
     if isinstance(node_type, ts.FieldType):
-        assert isinstance(output_domain_tree, domain_utils.SymbolicDomain)
-        assert isinstance(output_tree, gtir_dataflow.DataflowOutputEdge)
+        assert isinstance(output, gtir_dataflow.DataflowOutputEdge)
+        assert isinstance(output_domain, domain_utils.SymbolicDomain)
         return _create_scan_field_operator_impl(
-            ctx, sdfg_builder, output_domain_tree, output_tree, node_type, map_exit
+            ctx, sdfg_builder, output, output_domain, node_type, map_exit
         )
     else:
-        # handle tuples of fields
-        # the symbol name 'x' in the call below is not used, we only need
-        # the tree structure of the `TupleType` definition to pass to `tree_map()`
+        # Handle tuples of fields. note that the symbol name 'x' in the call below
+        # is not used, we only need the tree structure of the `TupleType` definition
+        # to pass to `tree_map()` in order to retrieve the type of each field.
         output_symbol_tree = gtir_to_sdfg_utils.make_symbol_tree("x", node_type)
         return gtx_utils.tree_map(
-            lambda domain_, edge_, sym_, ctx_=ctx: (
+            lambda edge_, domain_, sym_, ctx_=ctx: (
                 _create_scan_field_operator_impl(
                     ctx_,
                     sdfg_builder,
-                    domain_,
                     edge_,
+                    domain_,
                     sym_.type,
                     map_exit,
                 )
             )
-        )(output_domain_tree, output_tree, output_symbol_tree)
+        )(output, output_domain, output_symbol_tree)
 
 
 def _scan_input_name(input_name: str) -> str:
@@ -580,8 +582,6 @@ def translate_scan(
     node: gtir.Node,
     ctx: gtir_to_sdfg.SubgraphContext,
     sdfg_builder: gtir_to_sdfg.SDFGBuilder,
-    domain: gtir_domain.FieldopDomain,
-    fieldop_args: Sequence[gtir_to_sdfg_types.FieldopResult],
 ) -> gtir_to_sdfg_types.FieldopResult:
     """
     Generates the dataflow subgraph for the `as_fieldop` builtin with a scan operator.
@@ -651,9 +651,13 @@ def translate_scan(
         im.sym(scan_carry, scan_carry_type),
     )
 
+    # visit the arguments to be passed to the lambda expression
+    # this must be executed before visiting the lambda expression, in order to populate
+    # the data descriptor with the correct field domain offsets for field arguments
+    lambda_args = [sdfg_builder.visit(arg, ctx=ctx) for arg in node.args]
     lambda_args_mapping = [
         (im.sym(_scan_input_name(scan_carry), scan_carry_type), init_data),
-    ] + [(param, arg) for param, arg in zip(stencil_expr.params[1:], fieldop_args, strict=True)]
+    ] + [(param, arg) for param, arg in zip(stencil_expr.params[1:], lambda_args, strict=True)]
 
     lambda_arg_nodes = dict(
         itertools.chain(
@@ -690,7 +694,8 @@ def translate_scan(
     for input_connector, outer_arg in lambda_arg_nodes.items():
         assert not lambda_ctx.sdfg.arrays[input_connector].transient
         if outer_arg is None:
-            # this argument has empty domain, therefore it should not be used inside the nested SDFG
+            # This argument has empty domain, which means that it should not be
+            # used inside the nested SDFG, and does not need to be connected outside.
             assert all(
                 node.data != input_connector
                 for node in lambda_ctx.sdfg.all_nodes_recursive()

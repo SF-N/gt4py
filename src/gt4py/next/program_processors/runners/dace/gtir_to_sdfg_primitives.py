@@ -69,14 +69,18 @@ class PrimitiveTranslator(Protocol):
 
 
 def _parse_fieldop_arg(
-    arg: gtir_to_sdfg_types.FieldopResult,
+    node: gtir.Expr,
     ctx: gtir_to_sdfg.SubgraphContext,
+    sdfg_builder: gtir_to_sdfg.SDFGBuilder,
     domain: gtir_domain.FieldopDomain,
 ) -> MaybeNestedInTuple[gtir_dataflow.IteratorExpr | gtir_dataflow.MemletExpr]:
-    """Helper method to visit an expression passed as argument to a field operator."""
+    """
+    Helper method to visit an expression passed as argument to a field operator
+    and create the local view for the field argument.
+    """
+    arg = sdfg_builder.visit(node, ctx=ctx)
 
     if not isinstance(arg, gtir_to_sdfg_types.FieldopData):
-        assert isinstance(arg, tuple)
         raise ValueError("Expected a field, found a tuple of fields.")
     return arg.get_local_view(domain, ctx.sdfg)
 
@@ -227,8 +231,8 @@ def _create_field_operator(
         # handle tuples of fields
         output_symbol_tree = gtir_to_sdfg_utils.make_symbol_tree("x", node_type)
         return gtx_utils.tree_map(
-            lambda _edge, _sym, _ctx=ctx: _create_field_operator_impl(
-                _ctx, sdfg_builder, domain, _edge, _sym.type, map_exit
+            lambda edge_, sym_, ctx_=ctx: _create_field_operator_impl(
+                ctx_, sdfg_builder, domain, edge_, sym_.type, map_exit
             )
         )(output_tree, output_symbol_tree)
 
@@ -259,17 +263,8 @@ def translate_as_fieldop(
     assert len(fun_node.args) == 2
     fieldop_expr, fieldop_domain_expr = fun_node.args
 
-    # visit the list of arguments to be passed to the lambda expression
-    fieldop_args = [sdfg_builder.visit(arg, ctx=ctx) for arg in node.args]
-
-    # visit the domain of the field operator
-    assert isinstance(fieldop_domain_expr.type, ts.DomainType)
-    field_domain = gtir_domain.get_field_domain(
-        domain_utils.SymbolicDomain.from_expr(fieldop_domain_expr)
-    )
-
     if cpm.is_call_to(fieldop_expr, "scan"):
-        return translate_scan(node, ctx, sdfg_builder, field_domain, fieldop_args)
+        return translate_scan(node, ctx, sdfg_builder)
 
     if cpm.is_ref_to(fieldop_expr, "deref"):
         # Special usage of 'deref' as argument to fieldop expression, to pass a scalar
@@ -287,10 +282,18 @@ def translate_as_fieldop(
             f"Expression type '{type(fieldop_expr)}' not supported as argument to 'as_fieldop' node."
         )
 
+    # visit the domain of the field operator
+    assert isinstance(fieldop_domain_expr.type, ts.DomainType)
+    field_domain = gtir_domain.get_field_domain(
+        domain_utils.SymbolicDomain.from_expr(fieldop_domain_expr)
+    )
+
+    # visit the field operator arguments
+    fieldop_args = [_parse_fieldop_arg(arg, ctx, sdfg_builder, field_domain) for arg in node.args]
+
     # represent the field operator as a mapped tasklet graph, which will range over the field domain
-    iterator_args = [_parse_fieldop_arg(arg, ctx, field_domain) for arg in fieldop_args]
     input_edges, output_edges = gtir_dataflow.translate_lambda_to_dataflow(
-        ctx.sdfg, ctx.state, sdfg_builder, stencil_expr, iterator_args
+        ctx.sdfg, ctx.state, sdfg_builder, stencil_expr, fieldop_args
     )
 
     return _create_field_operator(
@@ -724,5 +727,6 @@ if TYPE_CHECKING:
         translate_make_tuple,
         translate_tuple_get,
         translate_scalar_expr,
+        translate_scan,
         translate_symbol_ref,
     ]

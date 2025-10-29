@@ -692,10 +692,9 @@ class GTIRToSDFG(eve.NodeVisitor, SDFGBuilder):
         Returns:
           The SDFG head state, eventually updated if the target write requires a new state.
         """
-        target_state: Optional[dace.SDFGState] = None
 
         # Visit the domain expression.
-        domain = gtir_domain.DomainParser().apply(stmt.domain)
+        domain = gtir_domain.TargetDomainParser().apply(stmt.domain)
 
         # Visit the field operator expression.
         source_tree = self._visit_expression(stmt.expr, sdfg, state)
@@ -915,7 +914,8 @@ class GTIRToSDFG(eve.NodeVisitor, SDFGBuilder):
             elif nsdfg_dataname in lambda_arg_nodes:
                 arg_node = lambda_arg_nodes[nsdfg_dataname]
                 if arg_node is None:
-                    # this argument has empty domain, therefore it should not be used inside the nested SDFG
+                    # This argument has empty domain, which means that it should not be
+                    # used inside the nested SDFG, and does not need to be connected outside.
                     assert all(
                         node.data != nsdfg_dataname
                         for node in lambda_ctx.sdfg.all_nodes_recursive()
