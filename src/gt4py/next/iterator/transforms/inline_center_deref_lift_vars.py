@@ -17,6 +17,7 @@ from gt4py.next.iterator.ir_utils import ir_makers as im
 from gt4py.next.iterator.transforms import trace_shifts
 from gt4py.next.iterator.transforms.inline_lambdas import inline_lambda
 from gt4py.next.iterator.transforms.inline_lifts import InlineLifts
+from gt4py.next.iterator.type_system import inference as type_inference
 
 
 def is_center_derefed_only(node: itir.Node) -> bool:
@@ -95,17 +96,21 @@ class InlineCenterDerefLiftVars(eve.NodeTranslator):
             for i, (param, arg) in enumerate(zip(node.fun.params, node.args)):
                 if cpm.is_applied_lift(arg) and is_center_derefed_only(param):
                     eligible_params[i] = True
-                    bound_arg_evaluator = self.uids.sequential_id(prefix="_icdlv")
-                    capture_lift = im.promote_to_const_iterator(im.call(bound_arg_evaluator)())
-                    trace_shifts.copy_recorded_shifts(from_=param, to=capture_lift)
-                    new_args.append(capture_lift)
-                    # since we deref an applied lift here we can (but don't need to) immediately
-                    # inline
-                    evaluators[bound_arg_evaluator] = im.lambda_()(
+                    bound_arg_evaluator_name = self.uids.sequential_id(prefix="__icdlv")
+                    bound_arg_evaluator = im.lambda_()(
                         InlineLifts(flags=InlineLifts.Flag.INLINE_DEREF_LIFT).visit(
                             im.deref(arg), recurse=False
                         )
                     )
+                    capture_lift = im.promote_to_const_iterator(
+                        im.call(im.ref(bound_arg_evaluator_name, bound_arg_evaluator.type))()
+                    )
+                    trace_shifts.copy_recorded_shifts(from_=param, to=capture_lift)
+
+                    new_args.append(capture_lift)
+                    # since we deref an applied lift here we can (but don't need to) immediately
+                    # inline
+                    evaluators[bound_arg_evaluator_name] = bound_arg_evaluator
                 else:
                     new_args.append(arg)
 
