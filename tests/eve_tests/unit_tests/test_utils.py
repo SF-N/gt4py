@@ -350,6 +350,46 @@ def test_shash(unique_data_items, hash_algorithm):
     assert len(hashes) == len(unique_data_items)
 
 
+def test_content_hash_is_object_identity_insensitive():
+    from gt4py.eve.utils import content_hash
+
+    # `content_hash` uses `pickle` internally. By default `pickle` memoizes objects
+    # by identity and emits back-references for repeated objects, so the serialized
+    # bytes (and thus the hash) of two value-equal structures depend on how much
+    # object *identity* is shared between their elements. `content_hash` must be
+    # stable with respect to such sharing patterns (otherwise cache keys derived
+    # from it become non-deterministic across processes).
+    #
+    # `list` objects are used here because (unlike small strings / ints) `pickle`
+    # does not intern them, so identity sharing is actually observable in the
+    # serialized byte stream.
+    inner = ["some_value", "another_value"]
+    shared = (inner, inner, inner)
+    distinct = (
+        ["some_value", "another_value"],
+        ["some_value", "another_value"],
+        ["some_value", "another_value"],
+    )
+
+    assert shared == distinct
+    assert content_hash(shared) == content_hash(distinct)
+
+
+def test_content_hash_is_object_identity_insensitive_nested():
+    from gt4py.eve.utils import content_hash
+
+    inner = {"key": ["nested_value_a", "nested_value_b"]}
+    shared = {"a": inner, "b": inner, "c": inner}
+    distinct = {
+        "a": {"key": ["nested_value_a", "nested_value_b"]},
+        "b": {"key": ["nested_value_a", "nested_value_b"]},
+        "c": {"key": ["nested_value_a", "nested_value_b"]},
+    }
+
+    assert shared == distinct
+    assert content_hash(shared) == content_hash(distinct)
+
+
 # -- CaseStyleConverter --
 @pytest.fixture
 def name_with_cases():

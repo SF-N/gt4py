@@ -642,6 +642,19 @@ def content_hash(
     interpreter reboots) and it does not use hash customizations on user
     classes (it uses `pickle` internally to get a byte stream).
 
+    The hash is also **independent of Python object identity-sharing patterns**:
+    two value-equal arguments produce the same hash regardless of how much
+    object identity is shared between their (equal) sub-components. This is
+    achieved by disabling `pickle`'s memoization (``Pickler.fast``), which
+    otherwise emits back-references for repeated object identities and would
+    make the serialized bytes (and thus the hash) depend on incidental sharing.
+
+    Note:
+        Disabling memoization means self-referential (cyclic) inputs are not
+        supported and would lead to infinite recursion. This is acceptable
+        because ``content_hash`` is only ever applied to acyclic data
+        (IR trees, type specifications, plain containers, ...).
+
     Arguments:
         hash_algorithm: object implementing the `hash algorithm` interface
             from :mod:`hashlib` or canonical name (`str`) of the
@@ -658,7 +671,12 @@ def content_hash(
         hasher = hash_algorithm
 
     buf = io.BytesIO()
-    pickler(buf).dump(args)
+    pickler_instance = pickler(buf)
+    # Disable memoization so the result does not depend on object identity sharing
+    # (see docstring). `fast` is supported by both the C and the pure-Python
+    # `pickle.Pickler` implementations.
+    pickler_instance.fast = True
+    pickler_instance.dump(args)
 
     hasher.update(buf.getvalue())
     result = hasher.hexdigest()

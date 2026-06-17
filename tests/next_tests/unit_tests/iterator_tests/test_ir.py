@@ -50,3 +50,30 @@ def test_fingerprint_nested():
     node3 = node_maker("f3", "loc1")
     assert node1.fingerprint() == node2.fingerprint()
     assert node1.fingerprint() != node3.fingerprint()
+
+
+def test_fingerprint_is_object_identity_insensitive():
+    # The fingerprint is computed via `content_hash`, which serializes nodes with
+    # `pickle`. `pickle` memoizes objects by identity and emits back-references for
+    # repeated objects, so without care the serialized bytes (and thus the
+    # fingerprint) of two semantically-identical IR trees would differ depending on
+    # whether equal child nodes happen to be the *same* object or distinct (but
+    # equal) objects. Such sharing patterns differ between processes (e.g. an
+    # ahead-of-time precompilation process vs. the runtime), which would
+    # spuriously invalidate translation-cache lookups. The fingerprint must be
+    # invariant under these sharing differences.
+    def tree_maker(shared: bool):
+        if shared:
+            arg = ir.SymRef(id="arg")
+            arg_maker = lambda: arg
+        else:
+            arg_maker = lambda: ir.SymRef(id="arg")
+        return ir.FunCall(
+            fun=ir.SymRef(id="f"),
+            args=[arg_maker(), arg_maker(), arg_maker()],
+        )
+
+    shared_tree = tree_maker(shared=True)
+    distinct_tree = tree_maker(shared=False)
+    assert shared_tree == distinct_tree
+    assert shared_tree.fingerprint() == distinct_tree.fingerprint()
